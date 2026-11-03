@@ -227,8 +227,11 @@ jobs:
   promote:
     name: promote ${{ matrix.name }} / ${{ matrix.target }}
     needs: [plan, build]
+    # Run even when some builds failed (each entry checks its own scan
+    # marker), but never when planning failed or no build ran at all.
     if: >-
-      !cancelled() && needs.plan.outputs.count != '0' &&
+      !cancelled() && needs.plan.result == 'success' &&
+      needs.build.result != 'skipped' && needs.plan.outputs.count != '0' &&
       github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # Add required reviewers to images-*-approval environments in the repo

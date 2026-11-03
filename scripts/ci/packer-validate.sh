@@ -9,6 +9,25 @@ source scripts/ci/lib.sh
 PLAN=build/plan.json
 [[ -f "$PLAN" ]] || die "$PLAN not found; run scripts/imagefactory.py plan first"
 
+# Platform settings come from CI variables. When they're missing (before
+# setup, or on PRs from forks), validate with placeholders so the template
+# logic is still checked. Real values are always used for builds.
+missing=()
+placeholder() {
+  local name="PKR_VAR_$1"
+  if [[ -z "${!name:-}" ]]; then
+    export "${name}=$2"
+    missing+=("$1")
+  fi
+}
+placeholder azure_subscription_id 00000000-0000-0000-0000-000000000000
+placeholder azure_build_resource_group rg-validate-build
+placeholder azure_gallery_resource_group rg-validate-gallery
+placeholder azure_gallery_name sig_validate
+if [[ ${#missing[@]} -gt 0 ]]; then
+  log "CI variables not set (${missing[*]}); validating with placeholders"
+fi
+
 packer init packer/linux
 
 count="$(jq 'length' "$PLAN")"
