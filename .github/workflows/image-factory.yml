@@ -1,0 +1,306 @@
+# =============================================================================
+# Image factory: GitHub Actions
+#
+#   lint     requests, Packer, Ansible, Terraform, shell, YAML
+#   plan     pick the requests to build, render them, packer validate,
+#            emit a matrix with one entry per request x target
+#   build    Packer build + SBOM + Grype gate, one job per matrix entry
+#   promote  publish approved images; runs in GitHub environments
+#            (images-<target>, or images-<target>-approval for manual promotion)
+#
+# What gets built:
+#   push to main        requests added or changed in that push
+#   workflow_dispatch   the image_request input (the portal calls this), or everything
+#   schedule            every request (monthly patch rebuild)
+#   pull request        lint and plan only; nothing is built
+#
+# The same scripts run on GitLab (.gitlab-ci.yml), so the platform can change later.
+# =============================================================================
+name: image-factory
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 18 1 * *" # 02:23 SGT on the 1st of every month
+  workflow_dispatch:
+    inputs:
+      image_request:
+        description: "Request file(s), comma-separated, e.g. requests/ubuntu-2404-base.yaml"
+        type: string
+        default: ""
+      rebuild_all:
+        description: "Rebuild every request"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: image-factory-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PACKER_PLUGIN_PATH: ${{ github.workspace }}/.packer.d/plugins
+  GRYPE_DB_CACHE_DIR: ${{ github.workspace }}/.cache/grype
+  # Platform settings: repository variables (Settings > Secrets and variables >
+  # Actions > Variables), taken from the Terraform factory outputs.
+  PKR_VAR_aws_region: ${{ vars.PKR_VAR_aws_region }}
+  PKR_VAR_aws_subnet_id: ${{ vars.PKR_VAR_aws_subnet_id }}
+  PKR_VAR_aws_kms_key_id: ${{ vars.PKR_VAR_aws_kms_key_id }}
+  PKR_VAR_azure_subscription_id: ${{ vars.PKR_VAR_azure_subscription_id }}
+  PKR_VAR_azure_build_resource_group: ${{ vars.PKR_VAR_azure_build_resource_group }}
+  PKR_VAR_azure_gallery_resource_group: ${{ vars.PKR_VAR_azure_gallery_resource_group }}
+  PKR_VAR_azure_gallery_name: ${{ vars.PKR_VAR_azure_gallery_name }}
+  PKR_VAR_azure_gallery_location: ${{ vars.PKR_VAR_azure_gallery_location }}
+  CATALOG_SSM_PREFIX: ${{ vars.CATALOG_SSM_PREFIX || '/image-factory' }}
+  AWS_SHARE_ACCOUNT_IDS: ${{ vars.AWS_SHARE_ACCOUNT_IDS }}
+  AWS_SHARE_ORG_ARN: ${{ vars.AWS_SHARE_ORG_ARN }}
+  REGISTRY: ghcr.io
+
+jobs:
+  # ---------------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup-tools
+
+      - name: Read Terraform version
+        id: tf
+        run: grep '^TERRAFORM_VERSION=' ci/versions.env | cut -d= -f2 | sed 's/^/version=/' >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.tf.outputs.version }}
+          terraform_wrapper: false
+
+      - name: Requests
+        run: python3 scripts/imagefactory.py validate
+
+      - name: Packer format
+        run: |
+          packer init packer/linux
+          packer fmt -check -diff -recursive packer/
+
+      - name: YAML
+        run: yamllint -c .yamllint.yml .
+
+      - name: Shell scripts
+        run: shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/container/*.sh scripts/bootstrap/*.sh
+
+      - name: Ansible
+        working-directory: ansible
+        run: |
+          ansible-galaxy role install -r requirements.yml -p .galaxy/roles
+          ansible-playbook image.yml --syntax-check -i localhost,
+          ansible-lint --offline image.yml roles/
+
+      - name: Terraform
+        run: |
+          terraform fmt -check -diff -recursive terraform/
+          for dir in terraform/factory/aws terraform/factory/azure; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+
+  # ---------------------------------------------------------------------------
+  plan:
+    needs: lint
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed to diff changed requests
+
+      - uses: ./.github/actions/setup-tools
+
+      - name: Cache Packer plugins
+        uses: actions/cache@v4
+        with:
+          path: .packer.d/plugins
+          key: packer-plugins-${{ hashFiles('packer/**/plugins.pkr.hcl') }}
+
+      - name: Plan
+        id: plan
+        env:
+          IMAGE_REQUEST: ${{ inputs.image_request }}
+          REBUILD_ALL: ${{ inputs.rebuild_all }}
+          BEFORE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 scripts/imagefactory.py plan --out build
+
+      - name: Packer validate
+        run: scripts/ci/packer-validate.sh
+
+      - name: Plan summary
+        run: |
+          {
+            echo "### Image plan"
+            echo
+            echo '| Image | Version | Target | Fail on | Environment |'
+            echo '|---|---|---|---|---|'
+            jq -r '.[] | "| \(.name) | \(.version) | \(.target) | \(.fail_on_severity) | \(.environment) |"' build/matrix.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: build/
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  build:
+    name: build ${{ matrix.name }} / ${{ matrix.target }}
+    needs: plan
+    if: needs.plan.outputs.count != '0' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write # OIDC to AWS / Azure
+      packages: write # push to GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      IMAGE_NAME: ${{ matrix.name }}
+      IMAGE_VERSION: ${{ matrix.version }}
+      TARGET: ${{ matrix.target }}
+      FAIL_ON_SEVERITY: ${{ matrix.fail_on_severity }}
+      ONLY_FIXED: ${{ matrix.only_fixed }}
+      REGISTRY_USER: ${{ github.actor }}
+      REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: build
+
+      - uses: ./.github/actions/setup-tools
+
+      - name: Cache Packer plugins
+        uses: actions/cache@v4
+        with:
+          path: .packer.d/plugins
+          key: packer-plugins-${{ hashFiles('packer/**/plugins.pkr.hcl') }}
+
+      - name: AWS credentials (OIDC)
+        if: matrix.target == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ vars.PKR_VAR_aws_region }}
+          role-duration-seconds: 7200
+          role-session-name: image-factory-${{ github.run_id }}
+
+      - name: Azure login (OIDC)
+        if: matrix.target == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.PKR_VAR_azure_subscription_id }}
+
+      - name: Packer build
+        run: scripts/ci/packer-build.sh
+
+      - name: SBOM and vulnerability gate
+        run: scripts/ci/scan.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: output-${{ matrix.name }}-${{ matrix.target }}
+          path: build/${{ matrix.name }}/output/
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  promote:
+    name: promote ${{ matrix.name }} / ${{ matrix.target }}
+    needs: [plan, build]
+    if: >-
+      !cancelled() && needs.plan.outputs.count != '0' &&
+      github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # Add required reviewers to images-*-approval environments in the repo
+    # settings; images-<target> environments promote straight away.
+    # PROMOTION_ENVIRONMENTS=false (e.g. GitHub Free + private repo, where
+    # environments aren't available) promotes without an environment.
+    environment: ${{ vars.PROMOTION_ENVIRONMENTS != 'false' && matrix.environment || '' }}
+    permissions:
+      contents: write # create the release holding SBOMs and catalog records
+      id-token: write
+      packages: write # retag in GHCR
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      IMAGE_NAME: ${{ matrix.name }}
+      IMAGE_VERSION: ${{ matrix.version }}
+      TARGET: ${{ matrix.target }}
+      REGISTRY_USER: ${{ github.actor }}
+      REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+          path: build
+
+      - uses: actions/download-artifact@v4
+        continue-on-error: true # missing when the build failed early
+        with:
+          name: output-${{ matrix.name }}-${{ matrix.target }}
+          path: build/${{ matrix.name }}/output
+
+      - name: Check the scan gate
+        id: gate
+        run: |
+          if [[ -f "build/${IMAGE_NAME}/output/scan/PASSED-${TARGET}" ]]; then
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::${IMAGE_NAME} ${IMAGE_VERSION} (${TARGET}) did not pass build/scan; not promoting."
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: ./.github/actions/setup-tools
+        if: steps.gate.outputs.passed == 'true'
+
+      - name: AWS credentials (OIDC)
+        if: steps.gate.outputs.passed == 'true' && matrix.target == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ vars.PKR_VAR_aws_region }}
+          role-session-name: image-factory-promote-${{ github.run_id }}
+
+      - name: Azure login (OIDC)
+        if: steps.gate.outputs.passed == 'true' && matrix.target == 'azure'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.PKR_VAR_azure_subscription_id }}
+
+      - name: Promote
+        if: steps.gate.outputs.passed == 'true'
+        run: scripts/ci/promote.sh
+
+      - uses: actions/upload-artifact@v4
+        if: steps.gate.outputs.passed == 'true'
+        with:
+          name: catalog-${{ matrix.name }}-${{ matrix.target }}
+          path: build/${{ matrix.name }}/output/catalog-${{ matrix.target }}.json
+          retention-days: 365

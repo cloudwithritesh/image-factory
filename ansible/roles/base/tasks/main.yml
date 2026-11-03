@@ -1,0 +1,28 @@
+---
+# Bring the base image fully up to date. This patch level is what the
+# vulnerability scan judges, so scheduled rebuilds pick up new fixes.
+- name: Refresh the package index
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Apply all pending updates
+  ansible.builtin.apt:
+    upgrade: dist
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Check whether a reboot is needed (VMs)
+  when: image_kind == 'vm'
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: base_reboot_required
+
+- name: Reboot into the new kernel (VMs)
+  when: image_kind == 'vm' and base_reboot_required.stat.exists
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+
+- name: Remove superseded kernels and unused packages
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true

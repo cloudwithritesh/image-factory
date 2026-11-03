@@ -1,0 +1,16 @@
+aws_region = "ap-southeast-1"
+
+# Trust one platform or both (both makes a later move painless)
+github_repository   = "my-org/image-factory"
+gitlab_project_path = "" # e.g. "my-group/image-factory"
+
+# Already have a GitHub OIDC provider in this account?
+# create_github_oidc_provider = false
+# github_oidc_provider_arn    = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+
+consumer_account_ids = [
+  # "111111111111",
+]
+tags = {
+  Owner = "platform-engineering"
+}

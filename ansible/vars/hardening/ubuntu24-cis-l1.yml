@@ -1,0 +1,6 @@
+---
+# Profile cis-l1: CIS Level 1 Server.
+# Level 2 tasks are skipped with --skip-tags level2-server (see
+# catalog/hardening.yaml). These flags make the role's own facts match.
+ubtu24cis_level_1: true
+ubtu24cis_level_2: false

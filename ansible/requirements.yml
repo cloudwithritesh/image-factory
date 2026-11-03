@@ -1,0 +1,11 @@
+# Third-party roles, pinned to a release tag. Packer installs them into
+# ansible/.galaxy/roles before each build (galaxy_file in build.pkr.hcl).
+# Collections come from the pinned `ansible` package in the CI toolbox image.
+#
+# Upgrading a hardening role is a reviewed change: bump the version, read
+# the role's Changelog.md, adjust ansible/vars/hardening/ and rebuild.
+roles:
+  - name: ubuntu24_cis
+    src: https://github.com/ansible-lockdown/UBUNTU24-CIS.git
+    scm: git
+    version: "1.8.0" # CIS Ubuntu 24.04 LTS Benchmark v1.0.0

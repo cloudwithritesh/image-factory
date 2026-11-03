@@ -1,0 +1,42 @@
+# -----------------------------------------------------------------------------
+# Hardening catalog: which hardening profiles exist for each OS and kind.
+#
+#   kind "vm"        -> AWS AMIs and Azure gallery images
+#   kind "container" -> Docker images
+#
+# Each OS has one default profile per kind; a request can pick any other
+# listed profile. A profile maps to:
+#   role       Ansible role to run ("none" = skip hardening)
+#   vars_file  file under ansible/vars/hardening/ with build-safe overrides
+#   skip_tags  Ansible tags to skip (this is how CIS levels are selected)
+# -----------------------------------------------------------------------------
+ubuntu-2404:
+  vm:
+    default: cis-l1
+    profiles:
+      none:
+        description: No hardening. Lab and sandbox use only.
+        role: none
+      cis-l1:
+        description: CIS Ubuntu 24.04 LTS Benchmark v1.0.0, Level 1 Server
+        role: ubuntu24_cis
+        vars_file: ubuntu24-cis-l1.yml
+        skip_tags: [level2-server]
+      cis-l2:
+        description: CIS Ubuntu 24.04 LTS Benchmark v1.0.0, Level 1 + Level 2 Server
+        role: ubuntu24_cis
+        vars_file: ubuntu24-cis-l2.yml
+        skip_tags: []
+  container:
+    default: cis-l1-container
+    profiles:
+      none:
+        description: No hardening, apart from patching and cleanup.
+        role: none
+      cis-l1-container:
+        description: >-
+          CIS Level 1 in container mode. The role detects the container and
+          skips kernel, boot, firewall, auditd and AIDE controls.
+        role: ubuntu24_cis
+        vars_file: ubuntu24-cis-container.yml
+        skip_tags: [level2-server]

@@ -1,0 +1,6 @@
+# Python tools every runner needs (GitHub runners already ship az and aws CLIs).
+ansible==14.5.0        # ansible-core 2.21.x + community collections (community.general, ansible.posix, ...)
+ansible-lint==26.10.1
+jsonschema==4.26.0
+pyyaml==6.0.3
+yamllint==1.38.0

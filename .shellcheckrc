@@ -1,0 +1,2 @@
+# CI variables (CI_*, PKR_VAR_*, AWS_*, AZURE_*) come from GitLab, not from the scripts.
+disable=SC2154

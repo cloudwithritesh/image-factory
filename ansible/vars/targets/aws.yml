@@ -1,0 +1,4 @@
+---
+# Tells the CIS role to skip tasks that don't work on EC2 (GRUB, reboots).
+system_is_ec2: true
+factory_ufw_out_ports_target: []

@@ -1,0 +1,29 @@
+# -----------------------------------------------------------------------------
+# OS catalog: the base image for each OS on each target.
+#
+# The portal (Backstage) builds its "operating system" dropdown from the keys
+# here. Packer receives the target block that matches the target being built.
+# Add a new OS by adding a key here, plus a hardening entry in hardening.yaml.
+# -----------------------------------------------------------------------------
+ubuntu-2404:
+  display_name: Ubuntu 24.04 LTS
+  family: linux
+  distro: ubuntu
+  targets:
+    aws:
+      source_ami_filter_name: "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
+      source_ami_owners: ["099720109477"] # Canonical
+      ssh_username: ubuntu
+    azure:
+      image_publisher: Canonical
+      image_offer: ubuntu-24_04-lts
+      image_sku: server # Gen2
+      hyper_v_generation: V2
+      gallery_image_definition: ubuntu-2404
+    docker:
+      # Point this at your registry mirror / Docker Hub pull-through cache
+      # in production to avoid rate limits.
+      base_image: "docker.io/library/ubuntu:24.04"
+
+# Phase 2 (planned): rhel-9, rocky-9, amazonlinux-2023 (aws + docker),
+# windows-2022 (aws + azure). Each gets its own entry here.

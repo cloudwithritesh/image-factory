@@ -1,0 +1,87 @@
+---
+# Golden-image provisioning, run by Packer against the build VM or container.
+#
+# Inputs (extra vars):
+#   @build/<image>/ansible-<kind>.json   written by scripts/imagefactory.py
+#   packer_source_type                   amazon-ebs | azure-arm | docker
+#
+# Order: patch -> install approved software -> harden -> record build info.
+# Hardening runs last so that no later step can undo it.
+- name: Build golden image
+  hosts: all
+  gather_facts: true
+  become: "{{ packer_source_type != 'docker' }}"
+
+  vars:
+    image_target: "{{ {'amazon-ebs': 'aws', 'azure-arm': 'azure', 'docker': 'docker'}[packer_source_type] }}"
+    hardening_vars_dir: "{{ playbook_dir }}/vars/hardening"
+
+  pre_tasks:
+    - name: Check required inputs
+      ansible.builtin.assert:
+        that:
+          - image_name is defined
+          - image_version is defined
+          - image_kind in ['vm', 'container']
+          - packer_source_type in ['amazon-ebs', 'azure-arm', 'docker']
+          - software_items is defined
+          - hardening_role is defined
+        fail_msg: Missing inputs. Run Packer with the vars file rendered by scripts/imagefactory.py.
+
+    - name: Load target-specific settings
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/targets/{{ image_target }}.yml"
+
+  roles:
+    - role: base
+    - role: software
+
+  tasks:
+    - name: Hardening
+      when: hardening_role != 'none'
+      block:
+        - name: Load common settings for the hardening role
+          ansible.builtin.include_vars:
+            file: "{{ hardening_vars_dir }}/{{ hardening_role }}.common.yml"
+
+        - name: Load settings for profile {{ hardening_profile }}
+          ansible.builtin.include_vars:
+            file: "{{ hardening_vars_dir }}/{{ hardening_vars_file }}"
+
+        - name: Find the role's container settings
+          when: image_kind == 'container'
+          ansible.builtin.stat:
+            path: "{{ playbook_dir }}/.galaxy/roles/{{ hardening_role }}/vars/is_container.yml"
+          delegate_to: localhost
+          become: false
+          register: container_vars
+
+        - name: Load the role's container settings (skips kernel, boot, firewall and audit controls)
+          when: image_kind == 'container' and container_vars.stat.exists
+          ansible.builtin.include_vars:
+            file: "{{ container_vars.stat.path }}"
+
+        - name: Apply hardening profile {{ hardening_profile }}
+          ansible.builtin.include_role:
+            name: "{{ hardening_role }}"
+
+    - name: Create the build information folder
+      ansible.builtin.file:
+        path: /etc/image-factory
+        state: directory
+        mode: "0755"
+
+    - name: Record build information inside the image
+      ansible.builtin.copy:
+        dest: /etc/image-factory/build-info.json
+        mode: "0644"
+        content: "{{ build_info | to_nice_json }}\n"
+      vars:
+        build_info:
+          image_name: "{{ image_name }}"
+          image_version: "{{ image_version }}"
+          os: "{{ os_key }}"
+          target: "{{ image_target }}"
+          hardening_profile: "{{ hardening_profile }}"
+          software: "{{ software_items | selectattr('targets', 'contains', image_target) | map(attribute='key') | list }}"
+          built_at: "{{ now(utc=true).isoformat() }}"

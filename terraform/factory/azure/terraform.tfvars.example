@@ -1,0 +1,10 @@
+subscription_id = "00000000-0000-0000-0000-000000000000"
+location        = "southeastasia"
+
+# Trust one platform or both
+github_repository   = "my-org/image-factory"
+gitlab_project_path = "" # e.g. "my-group/image-factory"
+
+tags = {
+  Owner = "platform-engineering"
+}

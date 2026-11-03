@@ -1,0 +1,4 @@
+---
+factory_ufw_out_ports_target:
+  # WALinuxAgent talks to the Azure WireServer (168.63.129.16) on 80 and 32526
+  - { port: 32526, proto: tcp }

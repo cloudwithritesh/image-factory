@@ -1,0 +1,6 @@
+---
+# Profile cis-l2: CIS Level 1 + Level 2 Server.
+# Level 2 adds AppArmor enforce mode, stricter auditd rules and more
+# mount options. Test your workloads before adopting it.
+ubtu24cis_level_1: true
+ubtu24cis_level_2: true

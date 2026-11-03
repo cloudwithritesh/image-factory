@@ -1,0 +1,142 @@
+# =============================================================================
+# Image factory: parent pipeline
+#
+#   toolbox   build the CI toolbox image (only when ci/ changes, or on demand)
+#   validate  lint requests, Packer, Ansible, Terraform and shell scripts
+#   plan      pick the requests to build, render them, run packer validate,
+#             and generate the child pipeline
+#   images    run the child pipeline: build -> scan -> promote per target
+#
+# What gets built:
+#   - push to main         requests added or changed in that push
+#   - API/portal trigger   IMAGE_REQUEST=requests/<name>.yaml (comma-separated list)
+#   - schedule             every request (monthly patch rebuild); or REBUILD_ALL=true
+#   - merge request        validation and planning only, nothing is built
+# =============================================================================
+
+workflow:
+  name: "$PIPELINE_NAME"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      variables: { PIPELINE_NAME: "MR validation: $CI_MERGE_REQUEST_TITLE" }
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      variables: { PIPELINE_NAME: "Scheduled rebuild of all images" }
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $IMAGE_REQUEST
+      variables: { PIPELINE_NAME: "Image request: $IMAGE_REQUEST" }
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables: { PIPELINE_NAME: "$CI_COMMIT_TITLE" }
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never # the MR pipeline covers it
+    - if: $CI_COMMIT_BRANCH
+      variables: { PIPELINE_NAME: "Branch validation: $CI_COMMIT_REF_NAME" }
+
+variables:
+  TOOLBOX_VERSION: "1.0.0"
+  TOOLBOX_IMAGE: "$CI_REGISTRY_IMAGE/toolbox:$TOOLBOX_VERSION"
+  IMAGE_REQUEST:
+    value: ""
+    description: "Request file(s) to build, comma-separated, e.g. requests/ubuntu-2404-base.yaml. Leave empty to build requests changed in this commit."
+  REBUILD_ALL:
+    value: "false"
+    options: ["false", "true"]
+    description: "Rebuild every request in requests/"
+  BUILD_TOOLBOX:
+    value: "false"
+    options: ["false", "true"]
+    description: "Rebuild the CI toolbox image (needed once, before the first pipeline)"
+
+stages: [toolbox, validate, plan, images]
+
+default:
+  image: $TOOLBOX_IMAGE
+  interruptible: true
+
+# -----------------------------------------------------------------------------
+toolbox:
+  stage: toolbox
+  image: docker:27
+  services: ["docker:27-dind"]
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker build --pull -t "$TOOLBOX_IMAGE" ci/
+    - docker push "$TOOLBOX_IMAGE"
+  rules:
+    - if: $BUILD_TOOLBOX == "true"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      changes: [ci/Dockerfile, ci/requirements.txt, ci/requirements-core.txt]
+
+# -----------------------------------------------------------------------------
+lint:requests:
+  stage: validate
+  script:
+    - python3 scripts/imagefactory.py validate
+
+lint:packer:
+  stage: validate
+  variables:
+    PACKER_PLUGIN_PATH: $CI_PROJECT_DIR/.packer.d/plugins
+  cache:
+    key: packer-plugins-v1
+    paths: [.packer.d/plugins]
+  script:
+    - packer init packer/linux
+    - packer fmt -check -diff -recursive packer/
+
+lint:ansible:
+  stage: validate
+  script:
+    - ansible-galaxy role install -r ansible/requirements.yml -p ansible/.galaxy/roles
+    - cd ansible && ansible-playbook image.yml --syntax-check -i localhost,
+    - ansible-lint --offline image.yml roles/
+  allow_failure:
+    exit_codes: [2] # lint findings warn; syntax errors (exit 4) fail
+
+lint:yaml:
+  stage: validate
+  script:
+    - yamllint -c .yamllint.yml .
+
+lint:shell:
+  stage: validate
+  script:
+    - shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/container/*.sh scripts/bootstrap/*.sh
+
+lint:terraform:
+  stage: validate
+  script:
+    - terraform fmt -check -diff -recursive terraform/
+    - |
+      for dir in terraform/factory/aws terraform/factory/azure; do
+        terraform -chdir="$dir" init -backend=false -input=false
+        terraform -chdir="$dir" validate
+      done
+
+# -----------------------------------------------------------------------------
+plan:
+  stage: plan
+  needs: ["lint:requests"]
+  variables:
+    PACKER_PLUGIN_PATH: $CI_PROJECT_DIR/.packer.d/plugins
+  cache:
+    key: packer-plugins-v1
+    paths: [.packer.d/plugins]
+    policy: pull
+  script:
+    - python3 scripts/imagefactory.py plan --out build
+    - scripts/ci/packer-validate.sh
+  artifacts:
+    paths: [build/]
+    expire_in: 30 days
+
+images:
+  stage: images
+  needs: [plan]
+  trigger:
+    include:
+      - artifact: build/child-pipeline.yml
+        job: plan
+    strategy: depend
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

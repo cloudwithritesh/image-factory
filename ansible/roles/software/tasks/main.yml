@@ -1,0 +1,95 @@
+---
+# Install the catalog items the request asked for. Items carry their own
+# `targets` list, so one request can include VM-only tools and still build
+# a container image.
+- name: Select the software for target {{ image_target }}
+  ansible.builtin.set_fact:
+    software_apt: "{{ selected | selectattr('type', 'equalto', 'apt') | list }}"
+    software_url: "{{ selected | selectattr('type', 'equalto', 'url') | list }}"
+    software_file: "{{ selected | selectattr('type', 'equalto', 'file') | list }}"
+  vars:
+    selected: "{{ software_items | selectattr('targets', 'contains', image_target) | list }}"
+
+# ---- apt ---------------------------------------------------------------------
+- name: Install packages
+  when: software_apt | length > 0
+  ansible.builtin.apt:
+    name: "{{ software_apt | map(attribute='packages') | flatten | unique }}"
+    state: present
+    install_recommends: false
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+# ---- url ---------------------------------------------------------------------
+- name: Create install folders for downloads
+  when: item.unarchive | default(false)
+  ansible.builtin.file:
+    path: "{{ item.dest }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ software_url }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Download (checksum verified)
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    checksum: "{{ item.checksum }}"
+    dest: "{{ ('/tmp/' ~ (item.url | basename)) if (item.unarchive | default(false)) else item.dest }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop: "{{ software_url }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Unpack downloads
+  when: item.unarchive | default(false)
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ item.url | basename }}"
+    dest: "{{ item.dest }}"
+    remote_src: true
+    extra_opts: "{{ ['--strip-components=' ~ item.strip_components] if item.strip_components is defined else [] }}"
+  loop: "{{ software_url }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Link binaries into /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ item.0.dest }}/{{ item.1 }}"
+    dest: "/usr/local/bin/{{ item.1 }}"
+    state: link
+  loop: "{{ software_url | subelements('bin_links', skip_missing=True) }}"
+  loop_control:
+    label: "{{ item.1 }}"
+
+- name: Remove downloaded archives
+  when: item.unarchive | default(false)
+  ansible.builtin.file:
+    path: "/tmp/{{ item.url | basename }}"
+    state: absent
+  loop: "{{ software_url }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+# ---- file --------------------------------------------------------------------
+- name: Copy files from the repository
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/files/{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "{{ item.mode | default('0644') }}"
+    owner: root
+    group: root
+  loop: "{{ software_file }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: software_copied_files
+
+- name: Refresh the CA trust store
+  when: >-
+    software_copied_files.results | default([])
+    | selectattr('changed')
+    | map(attribute='item')
+    | selectattr('notify', 'defined')
+    | selectattr('notify', 'equalto', 'update-ca-certificates')
+    | list | length > 0
+  ansible.builtin.command: update-ca-certificates
+  changed_when: true

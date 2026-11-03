@@ -1,0 +1,9 @@
+---
+# Profile cis-l1-container: CIS Level 1 inside a container image.
+# The playbook also loads the role's own vars/is_container.yml, which turns
+# off controls that don't apply to containers (kernel, boot loader,
+# firewall, auditd, AIDE, AppArmor, time sync).
+system_is_container: true
+ubtu24cis_level_1: true
+ubtu24cis_level_2: false
+ubtu24cis_firewall_package: none

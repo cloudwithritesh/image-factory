@@ -1,0 +1,35 @@
+# Example image request. The self-service portal writes files like this one;
+# you can also write them by hand and open a merge request.
+apiVersion: imagefactory/v1
+kind: ImageRequest
+metadata:
+  name: ubuntu-2404-base
+  owner: platform-engineering
+  requested_by: ritesh
+  description: Hardened Ubuntu 24.04 base image for general workloads
+  labels:
+    cost-center: platform
+spec:
+  os: ubuntu-2404
+  targets: [azure, docker]       # add aws once the AWS foundation is deployed
+  hardening:
+    vm: cis-l1                    # default for ubuntu-2404 VMs
+    container: cis-l1-container   # default for ubuntu-2404 containers
+  software:
+    - ca-certificates
+    - curl
+    - jq
+    - unzip
+    - monitoring-basics           # VM targets only; skipped for docker
+    - node-exporter               # VM targets only; skipped for docker
+  aws:
+    instance_type: t3.medium
+    root_volume_gb: 20
+    copy_regions: []              # e.g. [ap-southeast-1, eu-west-1]
+  azure:
+    vm_size: Standard_D2s_v5
+    replication_regions: []       # the gallery's own region is always included
+  scan:
+    fail_on_severity: critical
+    only_fixed: true
+  promotion: auto

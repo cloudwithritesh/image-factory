@@ -1,3 +1,17 @@
+build/
+.packer.d/
+.packer-tmp/
+.cache/
+ansible/.galaxy/
+*.retry
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# --- from the GitHub template ---
 # Local .terraform directories
 .terraform/
 

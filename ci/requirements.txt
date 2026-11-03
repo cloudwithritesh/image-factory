@@ -1,0 +1,4 @@
+# Python tools in the GitLab CI toolbox image. Pinned; bump together.
+-r requirements-core.txt
+azure-cli==2.92.0
+awscli==1.46.2

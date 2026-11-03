@@ -1,0 +1,68 @@
+# -----------------------------------------------------------------------------
+# Software catalog: the approved installers and files a request can ask for.
+#
+# Supported types:
+#   apt   packages from the distro repositories
+#   url   download a file (checksum required) and optionally unpack it
+#   file  copy a file stored in this repo (ansible/files/...) onto the image
+#
+# `os` and `targets` limit where an item can be used. The renderer rejects a
+# request that asks for an item on an OS or target it doesn't support.
+# -----------------------------------------------------------------------------
+curl:
+  description: curl CLI
+  type: apt
+  packages: [curl]
+  os: [ubuntu-2404]
+  targets: [aws, azure, docker]
+
+jq:
+  description: jq JSON processor
+  type: apt
+  packages: [jq]
+  os: [ubuntu-2404]
+  targets: [aws, azure, docker]
+
+unzip:
+  description: unzip
+  type: apt
+  packages: [unzip]
+  os: [ubuntu-2404]
+  targets: [aws, azure, docker]
+
+ca-certificates:
+  description: Mozilla CA bundle
+  type: apt
+  packages: [ca-certificates]
+  os: [ubuntu-2404]
+  targets: [aws, azure, docker]
+
+monitoring-basics:
+  description: htop, sysstat and iotop for troubleshooting
+  type: apt
+  packages: [htop, sysstat, iotop]
+  os: [ubuntu-2404]
+  targets: [aws, azure]
+
+node-exporter:
+  description: Prometheus node_exporter binary (not enabled as a service)
+  type: url
+  url: https://github.com/prometheus/node_exporter/releases/download/v1.9.1/node_exporter-1.9.1.linux-amd64.tar.gz
+  # get_url fetches the published checksum list and matches the file name.
+  checksum: sha256:https://github.com/prometheus/node_exporter/releases/download/v1.9.1/sha256sums.txt
+  dest: /opt/node_exporter
+  unarchive: true
+  strip_components: 1
+  bin_links: [node_exporter]
+  os: [ubuntu-2404]
+  targets: [aws, azure]
+
+corp-root-ca:
+  description: Corporate root CA certificate, added to the system trust store
+  type: file
+  src: ca-certificates/corp-root-ca.crt # relative to ansible/files/
+  dest: /usr/local/share/ca-certificates/corp-root-ca.crt
+  mode: "0644"
+  notify: update-ca-certificates
+  os: [ubuntu-2404]
+  targets: [aws, azure, docker]

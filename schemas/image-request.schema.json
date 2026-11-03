@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://image-factory.local/schemas/image-request.schema.json",
+  "title": "ImageRequest",
+  "description": "A golden-image definition. Written by the self-service portal or by hand, and rendered into Packer and Ansible inputs by scripts/imagefactory.py.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "imagefactory/v1" },
+    "kind": { "const": "ImageRequest" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "owner"],
+      "properties": {
+        "name": {
+          "description": "Image name. Used in AMI names, gallery tags, registry paths and SSM parameter names.",
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{1,48}[a-z0-9])$"
+        },
+        "owner": { "type": "string", "minLength": 2, "description": "Owning team" },
+        "requested_by": { "type": "string" },
+        "description": { "type": "string", "maxLength": 250 },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "maxLength": 128 },
+          "propertyNames": { "pattern": "^[A-Za-z0-9_.-]{1,64}$" }
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "targets"],
+      "properties": {
+        "os": { "type": "string", "description": "Key from catalog/os.yaml" },
+        "targets": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["aws", "azure", "docker"] }
+        },
+        "hardening": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Profile names from catalog/hardening.yaml. Leave a field out to use the OS default.",
+          "properties": {
+            "vm": { "type": "string" },
+            "container": { "type": "string" }
+          }
+        },
+        "software": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "Keys from catalog/software.yaml"
+        },
+        "aws": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "instance_type": { "type": "string", "pattern": "^[a-z0-9]+\\.[a-z0-9]+$" },
+            "root_volume_gb": { "type": "integer", "minimum": 8, "maximum": 1024 },
+            "copy_regions": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z]{2}(-[a-z]+)+-\\d$" }
+            }
+          }
+        },
+        "azure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "vm_size": { "type": "string", "pattern": "^Standard_[A-Za-z0-9_]+$" },
+            "replication_regions": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z0-9]+$" }
+            }
+          }
+        },
+        "scan": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fail_on_severity": { "enum": ["negligible", "low", "medium", "high", "critical"] },
+            "only_fixed": {
+              "type": "boolean",
+              "description": "Fail only on vulnerabilities that have a fix available"
+            }
+          }
+        },
+        "promotion": {
+          "enum": ["auto", "manual"],
+          "description": "auto: promote as soon as the scan passes. manual: wait for an approver in GitLab."
+        }
+      }
+    }
+  }
+}

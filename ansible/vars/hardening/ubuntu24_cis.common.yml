@@ -1,0 +1,36 @@
+---
+# Shared overrides for ansible-lockdown/UBUNTU24-CIS 1.8.0
+# (CIS Ubuntu 24.04 LTS Benchmark v1.0.0). Loaded before the profile file.
+#
+# Every deviation from the role defaults is listed in
+# docs/hardening-exceptions.md. Keep that file and this one in step.
+
+# No audit binary (goss) on the image, and no reboot in the middle of the
+# role; the image reboots on first launch.
+setup_audit: false
+run_audit: false
+skip_reboot: true
+
+# EXCEPTION 5.2.4 "Ensure users must provide password for privilege escalation"
+# Packer's build user has no password, and the role's pre-check aborts when
+# this rule is on. cloud-init adds NOPASSWD for the default user at every
+# launch anyway, so the control is enforced per instance (e.g. by your
+# config management or by disabling the default user), not in the image.
+ubtu24cis_rule_5_2_4: false
+
+# Firewall: ufw, default deny. The role allows inbound OpenSSH.
+# Outbound is limited to the ports below plus target-specific ones from
+# ansible/vars/targets/<target>.yml.
+ubtu24cis_firewall_package: ufw
+factory_ufw_out_ports_common:
+  - { port: 53, proto: tcp }   # DNS
+  - { port: 53, proto: udp }   # DNS
+  - { port: 67, proto: udp }   # DHCP lease renewal
+  - { port: 80, proto: tcp }   # package mirrors, cloud metadata services
+  - { port: 123, proto: udp }  # NTP
+  - { port: 443, proto: tcp }  # HTTPS
+ubtu24cis_ufw_allow_out_ports: "{{ factory_ufw_out_ports_common + (factory_ufw_out_ports_target | default([])) }}"
+
+# GRUB password is a site decision: set ubtu24cis_set_boot_pass and a real
+# hash from a secret if you need it.
+ubtu24cis_set_boot_pass: false
