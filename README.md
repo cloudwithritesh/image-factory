@@ -207,6 +207,10 @@ in one place.
   VMs over a public IP, limited to the runner's IP. For private-only builds,
   use self-hosted runners inside the build VPC/VNet; no template changes
   are needed.
+- **GitHub immutable OIDC subjects**: repos created after 2026-07-15 get
+  tokens with `repo:<owner>@<owner_id>/<repo>@<repo_id>:...` subjects. Set
+  `github_owner_id` and `github_repository_id` in Terraform; the deploy
+  script does this for you.
 - **GitHub environments and OIDC**: a job that runs in an environment gets a
   different OIDC subject (`repo:<owner>/<repo>:environment:<name>`).
   Terraform trusts exactly the `images-*` environment names. If you rename

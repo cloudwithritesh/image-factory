@@ -112,13 +112,24 @@ resource "azuread_service_principal" "factory" {
 locals {
   github_issuer = "https://token.actions.githubusercontent.com"
 
+  # GitHub subject prefix. Repos created after 2026-07-15 (or opted in) use
+  # immutable IDs: repo:<owner>@<owner_id>/<repo>@<repo_id>. Older repos use
+  # repo:<owner>/<repo>. Set the IDs to trust the immutable form only.
+  github_owner = try(split("/", var.github_repository)[0], "")
+  github_repo  = try(split("/", var.github_repository)[1], "")
+  github_subject_prefix = (
+    var.github_repository_id != ""
+    ? "repo:${local.github_owner}@${var.github_owner_id}/${local.github_repo}@${var.github_repository_id}"
+    : "repo:${var.github_repository}"
+  )
+
   # Entra ID matches subjects exactly, so each one gets its own credential.
   # GitHub builds run on the branch; promotion jobs run in environments.
   federated_subjects = merge(
     var.github_repository == "" ? {} : {
-      "github-${var.github_ref}"         = { issuer = local.github_issuer, subject = "repo:${var.github_repository}:ref:refs/heads/${var.github_ref}" }
-      "github-env-images-azure"          = { issuer = local.github_issuer, subject = "repo:${var.github_repository}:environment:images-azure" }
-      "github-env-images-azure-approval" = { issuer = local.github_issuer, subject = "repo:${var.github_repository}:environment:images-azure-approval" }
+      "github-${var.github_ref}"         = { issuer = local.github_issuer, subject = "${local.github_subject_prefix}:ref:refs/heads/${var.github_ref}" }
+      "github-env-images-azure"          = { issuer = local.github_issuer, subject = "${local.github_subject_prefix}:environment:images-azure" }
+      "github-env-images-azure-approval" = { issuer = local.github_issuer, subject = "${local.github_subject_prefix}:environment:images-azure-approval" }
     },
     var.gitlab_project_path == "" ? {} : {
       "gitlab-${var.gitlab_ref}" = { issuer = var.gitlab_url, subject = "project_path:${var.gitlab_project_path}:ref_type:branch:ref:${var.gitlab_ref}" }

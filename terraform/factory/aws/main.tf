@@ -45,10 +45,17 @@ locals {
 
   # GitHub subject claims: builds run on the branch; promotion jobs run in
   # environments, which changes the subject.
+  # Repos created after 2026-07-15 use immutable subjects:
+  # repo:<owner>@<owner_id>/<repo>@<repo_id>. Set the IDs to trust that form.
+  github_subject_prefix = (
+    var.github_repository_id != ""
+    ? "repo:${try(split("/", var.github_repository)[0], "")}@${var.github_owner_id}/${try(split("/", var.github_repository)[1], "")}@${var.github_repository_id}"
+    : "repo:${var.github_repository}"
+  )
   github_subjects = [
-    "repo:${var.github_repository}:ref:refs/heads/${var.github_ref}",
-    "repo:${var.github_repository}:environment:images-aws",
-    "repo:${var.github_repository}:environment:images-aws-approval",
+    "${local.github_subject_prefix}:ref:refs/heads/${var.github_ref}",
+    "${local.github_subject_prefix}:environment:images-aws",
+    "${local.github_subject_prefix}:environment:images-aws-approval",
   ]
   github_provider_arn = (
     var.create_github_oidc_provider

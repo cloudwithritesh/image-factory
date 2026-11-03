@@ -37,6 +37,22 @@ variable "github_repository" {
   default     = ""
 }
 
+variable "github_owner_id" {
+  description = "Numeric ID of the GitHub repository owner (gh api repos/OWNER/REPO -q .owner.id). Set with github_repository_id for immutable OIDC subjects."
+  type        = string
+  default     = ""
+}
+
+variable "github_repository_id" {
+  description = "Numeric ID of the GitHub repository (gh api repos/OWNER/REPO -q .id). Required for repos created after 2026-07-15."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.github_repository_id == "" || can(regex("^[0-9]+$", var.github_repository_id))
+    error_message = "The github_repository_id value must be numeric."
+  }
+}
+
 variable "github_ref" {
   description = "Branch allowed to build on GitHub"
   type        = string

@@ -112,6 +112,12 @@ else
   ok "created ${REPO}"
 fi
 
+# Numeric IDs for GitHub's immutable OIDC subject format (repos created
+# after 2026-07-15 use it by default).
+GH_REPO_ID="$(gh api "repos/${REPO}" -q .id)"
+GH_OWNER_ID="$(gh api "repos/${REPO}" -q .owner.id)"
+ok "repo id ${GH_REPO_ID}, owner id ${GH_OWNER_ID}"
+
 # -----------------------------------------------------------------------------
 step "3/8  Terraform state storage"
 az group create --name "$STATE_RG" --location "$AZURE_LOCATION" \
@@ -144,7 +150,9 @@ step "4/8  Terraform: Azure foundation"
   terraform apply -input=false \
     -var="subscription_id=${AZURE_SUBSCRIPTION_ID}" \
     -var="location=${AZURE_LOCATION}" \
-    -var="github_repository=${REPO}"
+    -var="github_repository=${REPO}" \
+    -var="github_repository_id=${GH_REPO_ID}" \
+    -var="github_owner_id=${GH_OWNER_ID}"
 )
 CI_VARS="$(terraform -chdir=terraform/factory/azure output -json ci_variables)"
 ok "Azure foundation applied"
