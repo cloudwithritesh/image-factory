@@ -17,7 +17,8 @@ should be re-checked whenever the role version changes.
 | Audit (goss) | all | `setup_audit: false`, `run_audit: false` | Keeps audit tooling out of the image | Run the audit in a separate pipeline step (phase 2) |
 | Reboot during role | all | `skip_reboot: true` | The image reboots at first launch | — |
 | EC2-incompatible tasks | aws | `system_is_ec2: true` | Role-provided switch for EC2 (GRUB, reboot) | — |
-| Container mode | cis-l1-container | `system_is_container: true` and the role's `vars/is_container.yml` | Kernel, boot loader, firewall, auditd, AIDE, AppArmor and time sync controls don't apply inside containers | Host and runtime hardening (Kubernetes PSA, seccomp) |
+| Container mode | cis-l1-container | `system_is_container: true` and the role's `vars/is_container.yml` | Kernel, boot loader, firewall, auditd, AIDE, AppArmor and time sync controls don't apply inside containers. In this mode the role also skips most of section 5 (SSH, sudo, PAM, password ageing) by design. | Host and runtime hardening (Kubernetes PSA, seccomp, read-only rootfs, non-root user) |
+| Container extras (found in test builds) | cis-l1-container | Off: 1.6.1 dynamic-MOTD PAM edit, 2.1.22, 2.3.1.1, 2.3.3.x, 2.4.1.1, 3.3.x, all 6.1.x | No sshd PAM file, no systemd, no daemons (cron, chrony), `/proc/sys` read-only, logs go to stdout. The role's `is_container.yml` doesn't cover these. | Host/node hardening and the container runtime's logging |
 
 ## Known side effects
 

@@ -7,3 +7,58 @@ system_is_container: true
 ubtu24cis_level_1: true
 ubtu24cis_level_2: false
 ubtu24cis_firewall_package: none
+
+# 1.6.1 also edits /etc/pam.d/sshd to drop the dynamic MOTD; containers
+# have no SSH server, so that file doesn't exist. /etc/motd is still set.
+ubtu24cis_disable_dynamic_motd: false
+
+# 2.1.22 (audit only) lists services with systemctl; containers run no systemd.
+ubtu24cis_rule_2_1_22: false
+
+# 2.3.x time synchronisation: containers use the host clock. The role's
+# is_container.yml only covers systemd-timesyncd (2.3.2.x), not chrony.
+ubtu24cis_rule_2_3_1_1: false
+ubtu24cis_rule_2_3_3_1: false
+ubtu24cis_rule_2_3_3_2: false
+ubtu24cis_rule_2_3_3_3: false
+
+# 6.1.x system logging (journald, journal-remote, rsyslog): containers log to
+# stdout/stderr and the container runtime collects it.
+ubtu24cis_rule_6_1_1_1: false
+ubtu24cis_rule_6_1_1_2: false
+ubtu24cis_rule_6_1_1_3: false
+ubtu24cis_rule_6_1_1_4: false
+ubtu24cis_rule_6_1_2_1_1: false
+ubtu24cis_rule_6_1_2_1_2: false
+ubtu24cis_rule_6_1_2_1_3: false
+ubtu24cis_rule_6_1_2_1_4: false
+ubtu24cis_rule_6_1_2_2: false
+ubtu24cis_rule_6_1_2_3: false
+ubtu24cis_rule_6_1_2_4: false
+ubtu24cis_rule_6_1_3_1: false
+ubtu24cis_rule_6_1_3_2: false
+ubtu24cis_rule_6_1_3_3: false
+ubtu24cis_rule_6_1_3_4: false
+ubtu24cis_rule_6_1_3_5: false
+ubtu24cis_rule_6_1_3_6: false
+ubtu24cis_rule_6_1_3_7: false
+ubtu24cis_rule_6_1_3_8: false
+ubtu24cis_rule_6_1_4_1: false
+
+# 2.4.1.1 enables and starts the cron daemon; containers don't run daemons.
+ubtu24cis_rule_2_4_1_1: false
+
+# 3.3.x kernel network parameters (sysctl) are owned by the container host;
+# /proc/sys is read-only inside containers. Harden them on the host / node.
+ubtu24cis_rule_3_3_1: false
+ubtu24cis_rule_3_3_2: false
+ubtu24cis_rule_3_3_3: false
+ubtu24cis_rule_3_3_4: false
+ubtu24cis_rule_3_3_5: false
+ubtu24cis_rule_3_3_6: false
+ubtu24cis_rule_3_3_7: false
+ubtu24cis_rule_3_3_8: false
+ubtu24cis_rule_3_3_9: false
+ubtu24cis_rule_3_3_10: false
+ubtu24cis_rule_3_3_11: false
+ubtu24cis_ufw_use_sysctl: false
