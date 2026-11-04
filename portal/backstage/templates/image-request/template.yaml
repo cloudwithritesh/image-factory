@@ -28,8 +28,8 @@ spec:
           title: Image name
           type: string
           pattern: ^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$
-          ui:help: 'Lowercase, digits and hyphens. Existing images: ubuntu-2404-base. Use an existing name to change that
-            image.'
+          ui:help: 'Lowercase, digits and hyphens. Existing images: ubuntu-2404-base, ubuntu-rh-hardened. Use an existing
+            name to change that image.'
         owner:
           title: Owning team
           type: string

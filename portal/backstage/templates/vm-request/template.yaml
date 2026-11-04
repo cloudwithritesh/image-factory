@@ -69,6 +69,7 @@ spec:
           type: string
           enum:
             - ubuntu-2404-base
+            - ubuntu-rh-hardened
         image_version:
           title: Image version
           type: string
