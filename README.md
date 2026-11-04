@@ -24,6 +24,11 @@ request VMs. Every request becomes a reviewed pull request ([portal/README.md](p
 | Backstage (local) | http://localhost:3000/create after [setup](portal/README.md#backstage-local) |
 | Standards | [docs/standards.md](docs/standards.md): branches, commits, PRs |
 
+**Documentation:** [Architecture](docs/architecture.md) · [Workflows](docs/workflow.md) ·
+[Instructions](docs/instructions.md) (setup, daily use, troubleshooting) ·
+[Standards](docs/standards.md) · [Hardening exceptions](docs/hardening-exceptions.md) ·
+[Portal](portal/README.md)
+
 ## How it works
 
 1. **A request** (`requests/<name>.yaml`) says which OS, targets, hardening

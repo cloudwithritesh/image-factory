@@ -38,8 +38,11 @@ on:
 permissions:
   contents: read
 
+# PRs: one run per branch, newer pushes cancel older runs.
+# main/schedule/dispatch: every run gets its own group. A shared group keeps
+# only one pending run and would drop the requests changed by the others.
 concurrency:
-  group: image-factory-${{ github.ref }}
+  group: image-factory-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
