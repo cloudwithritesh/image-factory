@@ -12,7 +12,7 @@ output "public_ip" {
 
 output "image_version" {
   description = "Gallery image version the VM was built from"
-  value       = data.azurerm_shared_image_version.image.name
+  value       = basename(local.deployed_image_id)
 }
 
 output "ssh" {

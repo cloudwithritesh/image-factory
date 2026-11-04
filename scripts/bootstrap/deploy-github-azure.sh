@@ -60,7 +60,7 @@ ok "git, gh, az, terraform, jq found"
 
 tf_version="$(terraform version -json | jq -r .terraform_version)"
 case "$tf_version" in
-  0.*|1.[0-5].*) die "Terraform ${tf_version} is too old; need >= 1.6 (brew upgrade hashicorp/tap/terraform)" ;;
+  0.*|1.[0-6].*) die "Terraform ${tf_version} is too old; need >= 1.7 (brew upgrade hashicorp/tap/terraform)" ;;
 esac
 ok "terraform ${tf_version}"
 

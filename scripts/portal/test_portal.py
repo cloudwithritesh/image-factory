@@ -22,6 +22,28 @@ import standards  # noqa: E402
 
 KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl test@example"
 MARKER = "<!-- portal-request:v1 -->"
+FIXTURE_IMAGE = """apiVersion: imagefactory/v1
+kind: ImageRequest
+metadata:
+  name: ubuntu-2404-base
+  owner: platform-engineering
+  requested_by: ritesh
+spec:
+  os: ubuntu-2404
+  targets:
+    - azure
+    - docker
+  hardening:
+    vm: cis-l1
+    container: cis-l1-container
+  software:
+    - ca-certificates
+    - curl
+  scan:
+    fail_on_severity: critical
+    only_fixed: true
+  promotion: auto
+"""
 
 
 class Repo:
@@ -31,6 +53,11 @@ class Repo:
         self.tmp = Path(tempfile.mkdtemp(prefix="portal-test-"))
         self.root = self.tmp / "repo"
         shutil.copytree(ROOT, self.root, ignore=shutil.ignore_patterns(".git", "build", ".galaxy", "node_modules"))
+        # Deterministic inventory: one known image, no VMs, whatever the repo holds
+        for folder in ("requests", "vms"):
+            shutil.rmtree(self.root / folder, ignore_errors=True)
+            (self.root / folder).mkdir()
+        (self.root / "requests/ubuntu-2404-base.yaml").write_text(FIXTURE_IMAGE)
 
     def run(self, event: dict) -> dict:
         ev, out = self.tmp / "event.json", self.tmp / "out.json"
@@ -71,6 +98,23 @@ class Standards(unittest.TestCase):
         self.assertEqual(standards.check("feat/xy", "chore(vm): decommission vm web-01", ["fix: y", "Merge branch 'main'"]), [])
         self.assertTrue(standards.check("feat/xy", "Update stuff", []))
         self.assertTrue(standards.check("feat/xy", "feat: ok", ["wip"]))
+
+
+class Formatting(unittest.TestCase):
+    def test_written_yaml_passes_yamllint_style(self):
+        repo = Repo()
+        try:
+            r = repo.run(dispatch("vm", VM))
+            self.assertTrue(r["ok"], r)
+            text = (repo.root / "vms/web-01.yaml").read_text()
+            r = repo.run(issue({"kind": "image", "name": "ubuntu-2404-base", "software": ["curl", "jq"]}))
+            self.assertTrue(r["ok"], r)
+            image = (repo.root / "requests/ubuntu-2404-base.yaml").read_text()
+            # lists are indented under their key (yamllint default "indentation" rule)
+            self.assertIn("  targets:\n    - azure", image)
+            self.assertNotIn("\n  - ", text)
+        finally:
+            repo.close()
 
 
 class Processor(unittest.TestCase):

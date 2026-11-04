@@ -431,7 +431,26 @@ function validateVm(s) {
   return !!ok;
 }
 
+let vmLoaded = "";
+function loadExistingVm() {
+  // Typing an existing VM's name loads its settings, so an update changes
+  // only what you edit (e.g. a public IP isn't dropped by an unticked box).
+  const name = $("vm-name").value.trim();
+  const vm = D.vms[name];
+  if (!vm || name === vmLoaded) { if (!vm) vmLoaded = ""; return; }
+  vmLoaded = name;
+  const set = (id, v) => { if (v !== undefined && v !== null && v !== "") $(id).value = v; };
+  set("vm-owner", vm.owner); set("vm-env", vm.environment); set("vm-desc", vm.description);
+  set("vm-cloud", vm.cloud); renderVmOptions();
+  set("vm-image", vm.image); set("vm-size", vm.size); set("vm-region", vm.region);
+  set("vm-version", vm.image_version); set("vm-disk", vm.os_disk_gb); set("vm-admin", vm.admin_username);
+  set("vm-key", vm.ssh_public_key);
+  $("vm-pip").checked = !!vm.public_ip; set("vm-cidr", vm.allowed_ssh_cidr);
+  $("vm-note").className = "note"; $("vm-note").textContent = `Loaded the current settings of ${name}. Change what you need.`;
+}
+
 function updateVm() {
+  loadExistingVm();
   const s = vmState();
   document.querySelectorAll(".vm-create").forEach((el) => { el.hidden = s.state === "absent"; });
   $("vm-cidr-wrap").hidden = !(s.state === "present" && s.public_ip);

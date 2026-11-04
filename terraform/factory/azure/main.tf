@@ -9,7 +9,7 @@
 # =============================================================================
 
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.7.0" # removed blocks
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
@@ -85,18 +85,19 @@ resource "azurerm_subnet" "workloads" {
   address_prefixes     = [cidrsubnet(var.workload_vnet_cidr, 8, 1)]
 }
 
-# Default rules only: VNet traffic in, nothing in from the internet. A VM
-# that asks for a public IP gets its own NIC-level rule for its SSH range.
-resource "azurerm_network_security_group" "workloads" {
-  name                = "nsg-${var.name_prefix}-workloads"
-  resource_group_name = azurerm_resource_group.vms.name
-  location            = azurerm_resource_group.vms.location
-  tags                = local.tags
-}
+# No NSG on the subnet: each VM's NIC gets its own NSG (terraform/vm/azure),
+# because Azure requires inbound traffic to be allowed by *both* subnet and
+# NIC NSGs, and per-VM SSH ranges can't be known here.
 
-resource "azurerm_subnet_network_security_group_association" "workloads" {
-  subnet_id                 = azurerm_subnet.workloads.id
-  network_security_group_id = azurerm_network_security_group.workloads.id
+# Earlier versions created one gallery image definition per OS. Forget them
+# without deleting them (they may hold published versions); definitions are
+# now created per image request by the build job.
+removed {
+  from = azurerm_shared_image.os
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 # ---- CI workload identity ---------------------------------------------------

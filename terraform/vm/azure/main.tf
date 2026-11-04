@@ -25,13 +25,15 @@ provider "azurerm" {
 }
 
 locals {
+  # The image the VM was actually built from (see terraform_data.image)
+  deployed_image_id = terraform_data.image.output
   tags = {
     ManagedBy    = "image-factory"
     Owner        = var.owner
     Environment  = var.environment
     RequestedBy  = var.requested_by
     Image        = var.image
-    ImageVersion = data.azurerm_shared_image_version.image.name
+    ImageVersion = basename(local.deployed_image_id)
     Request      = "vms/${var.name}.yaml"
   }
 }
@@ -44,6 +46,26 @@ data "azurerm_shared_image_version" "image" {
   image_name          = var.image
   gallery_name        = var.gallery_name
   resource_group_name = var.gallery_resource_group
+
+  lifecycle {
+    # A pinned version could name a candidate that never passed the scan.
+    # Only versions tagged by the promote job are allowed.
+    postcondition {
+      condition     = try(self.tags["Status"], "") == "approved"
+      error_message = "Image ${var.image} version ${var.image_version} isn't approved (it hasn't passed the vulnerability gate). Use 'latest' or a promoted version."
+    }
+  }
+}
+
+# Pin the image the VM was created from. A newer "latest" doesn't rebuild a
+# running VM; changing image or image_version in the request does, on purpose.
+resource "terraform_data" "image" {
+  input            = data.azurerm_shared_image_version.image.id
+  triggers_replace = [var.image, var.image_version]
+
+  lifecycle {
+    ignore_changes = [input]
+  }
 }
 
 resource "azurerm_public_ip" "this" {
@@ -56,23 +78,28 @@ resource "azurerm_public_ip" "this" {
   tags                = local.tags
 }
 
-resource "azurerm_network_security_group" "ssh" {
-  count               = var.public_ip ? 1 : 0
+# Every VM gets its own NSG on its NIC: default rules (VNet in, internet
+# out) plus SSH from the requested range when it has a public IP. The subnet
+# has no NSG, so this is the single place inbound rules are decided.
+resource "azurerm_network_security_group" "this" {
   name                = "nsg-${var.name}"
   resource_group_name = var.resource_group_name
   location            = var.region
   tags                = local.tags
 
-  security_rule {
-    name                       = "ssh-from-allowed-range"
-    priority                   = 100
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "Tcp"
-    source_port_range          = "*"
-    destination_port_range     = "22"
-    source_address_prefix      = var.allowed_ssh_cidr
-    destination_address_prefix = "*"
+  dynamic "security_rule" {
+    for_each = var.public_ip ? [var.allowed_ssh_cidr] : []
+    content {
+      name                       = "ssh-from-allowed-range"
+      priority                   = 100
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = "22"
+      source_address_prefix      = security_rule.value
+      destination_address_prefix = "*"
+    }
   }
 }
 
@@ -90,10 +117,9 @@ resource "azurerm_network_interface" "this" {
   }
 }
 
-resource "azurerm_network_interface_security_group_association" "ssh" {
-  count                     = var.public_ip ? 1 : 0
+resource "azurerm_network_interface_security_group_association" "this" {
   network_interface_id      = azurerm_network_interface.this.id
-  network_security_group_id = azurerm_network_security_group.ssh[0].id
+  network_security_group_id = azurerm_network_security_group.this.id
 }
 
 resource "azurerm_linux_virtual_machine" "this" {
@@ -105,7 +131,7 @@ resource "azurerm_linux_virtual_machine" "this" {
   admin_username                  = var.admin_username
   disable_password_authentication = true
   network_interface_ids           = [azurerm_network_interface.this.id]
-  source_image_id                 = data.azurerm_shared_image_version.image.id
+  source_image_id                 = local.deployed_image_id
   tags                            = local.tags
 
   admin_ssh_key {
@@ -127,8 +153,9 @@ resource "azurerm_linux_virtual_machine" "this" {
   boot_diagnostics {} # managed storage account
 
   lifecycle {
-    # A newer golden image shouldn't silently rebuild a running VM. Pin
-    # image_version or recreate the VM deliberately to move to a new image.
-    ignore_changes = [source_image_id]
+    precondition {
+      condition     = !var.public_ip || var.allowed_ssh_cidr != ""
+      error_message = "A public IP needs allowed_ssh_cidr."
+    }
   }
 }

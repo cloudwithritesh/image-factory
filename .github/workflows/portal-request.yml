@@ -46,8 +46,10 @@ on:
 permissions:
   contents: read
 
+# One group per submission: a shared group keeps only one pending run and
+# would silently drop requests that arrive together.
 concurrency:
-  group: portal-request
+  group: portal-request-${{ github.event.issue.number || github.run_id }}
   cancel-in-progress: false
 
 jobs:

@@ -66,11 +66,17 @@ JSON
 )"
 existing="$(gh api "repos/${REPO}/rulesets" -q '.[] | select(.name=="main-protection") | .id' 2> /dev/null || true)"
 if [[ -n "$existing" ]]; then
-  gh api -X PUT "repos/${REPO}/rulesets/${existing}" --input - <<< "$ruleset" > /dev/null
+  method=PUT; path="repos/${REPO}/rulesets/${existing}"
 else
-  gh api -X POST "repos/${REPO}/rulesets" --input - <<< "$ruleset" > /dev/null
+  method=POST; path="repos/${REPO}/rulesets"
 fi
-ok "ruleset main-protection (PR + 1 approval + pr-standards; admins can bypass on own PRs)"
+if gh api -X "$method" "$path" --input - <<< "$ruleset" > /dev/null 2>&1; then
+  ok "ruleset main-protection (PR + 1 approval + pr-standards; admins can bypass on own PRs)"
+else
+  # Rulesets need a public repo or a paid plan (Pro/Team/Enterprise)
+  warn "couldn't create the ruleset (private repo on GitHub Free?). The pr-standards check"
+  warn "still runs on every PR, but main isn't protected: make the repo public or upgrade."
+fi
 
 if gh api "repos/${REPO}/pages" > /dev/null 2>&1; then
   gh api -X PUT "repos/${REPO}/pages" -f build_type=workflow > /dev/null
@@ -80,6 +86,11 @@ else
 fi
 pages_url="$(gh api "repos/${REPO}/pages" -q .html_url 2> /dev/null || true)"
 ok "GitHub Pages from the portal-pages workflow ${pages_url:+(${pages_url})}"
+if [[ -n "$pages_url" ]]; then
+  if gh workflow run portal-pages.yml --repo "$REPO" --ref main > /dev/null 2>&1; then
+    ok "started a portal-pages deployment"
+  fi
+fi
 
 echo
 echo "Optional (recommended): a GitHub App for the portal bot, so portal PRs run"
