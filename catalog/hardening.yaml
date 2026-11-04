@@ -11,7 +11,8 @@
 #   skip_tags  Ansible tags to skip (this is how CIS levels are selected)
 #
 # Roles
-#   ubuntu24_cis, rhel9_cis, amazon2023_cis, windows2022_cis
+#   ubuntu24_cis, ubuntu26_cis, rhel9_cis, rhel10_cis, amazon2023_cis,
+#   windows2022_cis, windows2025_cis
 #       ansible-lockdown CIS roles, pinned in ansible/requirements.yml
 #   baseline
 #       in-repo role (ansible/roles/baseline) for OSes without a maintained
@@ -232,4 +233,183 @@ windows-2022:
         description: CIS Microsoft Windows Server 2022 Benchmark, Level 1 + Level 2 Member Server
         role: windows2022_cis
         vars_file: windows2022-cis-l2.yml
+        skip_tags: []
+
+ubuntu-2604:
+  vm:
+    default: cis-l1
+    profiles:
+      none:
+        description: No hardening. Lab and sandbox use only.
+        role: none
+      baseline:
+        description: Factory baseline (SSH, sysctl, permissions, banner). Lighter than CIS.
+        role: baseline
+        vars_file: baseline-vm.yml
+      cis-l1:
+        description: CIS Ubuntu 26.04 LTS Benchmark v1.0.0, Level 1 Server (UBUNTU26-CIS 0.9.0)
+        role: ubuntu26_cis
+        vars_file: ubuntu26-cis-l1.yml
+        skip_tags: [level2-server]
+      cis-l2:
+        description: CIS Ubuntu 26.04 LTS Benchmark v1.0.0, Level 1 + Level 2 Server (UBUNTU26-CIS 0.9.0)
+        role: ubuntu26_cis
+        vars_file: ubuntu26-cis-l2.yml
+        skip_tags: []
+  # The 26.04 CIS role hasn't been tuned for containers here yet (Ubuntu
+  # 24.04 needed many container exclusions); use the baseline until it is.
+  container:
+    default: baseline-container
+    profiles:
+      none:
+        description: No hardening, apart from patching and cleanup.
+        role: none
+      baseline-container:
+        description: Factory container baseline (permissions, no setuid extras, non-root ready)
+        role: baseline
+        vars_file: baseline-container.yml
+
+rhel-10:
+  vm:
+    default: cis-l1
+    profiles:
+      none:
+        description: No hardening. Lab and sandbox use only.
+        role: none
+      baseline:
+        description: Factory baseline (SSH, sysctl, permissions, banner). Lighter than CIS.
+        role: baseline
+        vars_file: baseline-vm.yml
+      cis-l1:
+        description: CIS Red Hat Enterprise Linux 10 Benchmark, Level 1 Server
+        role: rhel10_cis
+        vars_file: rhel10-cis-l1.yml
+        skip_tags: [level2-server]
+      cis-l2:
+        description: CIS Red Hat Enterprise Linux 10 Benchmark, Level 1 + Level 2 Server
+        role: rhel10_cis
+        vars_file: rhel10-cis-l2.yml
+        skip_tags: []
+  container:
+    default: baseline-container
+    profiles:
+      none:
+        description: No hardening, apart from patching and cleanup.
+        role: none
+      baseline-container:
+        description: Factory container baseline (permissions, no setuid extras, non-root ready)
+        role: baseline
+        vars_file: baseline-container.yml
+
+ubi10-openshift:
+  container:
+    default: openshift
+    profiles:
+      none:
+        description: No hardening, apart from patching and cleanup. Still runs as UID 1001.
+        role: none
+      openshift:
+        description: >-
+          Container baseline plus OpenShift conventions: user 1001 in group 0,
+          group-writable app folders, no setuid binaries.
+        role: openshift
+        vars_file: openshift-container.yml
+
+rocky-10:
+  vm:
+    default: cis-l1
+    profiles:
+      none:
+        description: No hardening. Lab and sandbox use only.
+        role: none
+      baseline:
+        description: Factory baseline (SSH, sysctl, permissions, banner). Lighter than CIS.
+        role: baseline
+        vars_file: baseline-vm.yml
+      cis-l1:
+        description: CIS Rocky Linux 10 / RHEL 10 Benchmark, Level 1 Server
+        role: rhel10_cis
+        vars_file: rhel10-cis-l1.yml
+        skip_tags: [level2-server]
+      cis-l2:
+        description: CIS Rocky Linux 10 / RHEL 10 Benchmark, Level 1 + Level 2 Server
+        role: rhel10_cis
+        vars_file: rhel10-cis-l2.yml
+        skip_tags: []
+  container:
+    default: baseline-container
+    profiles:
+      none:
+        description: No hardening, apart from patching and cleanup.
+        role: none
+      baseline-container:
+        description: Factory container baseline (permissions, no setuid extras, non-root ready)
+        role: baseline
+        vars_file: baseline-container.yml
+
+fedora-45:
+  vm:
+    default: baseline
+    profiles:
+      none:
+        description: No hardening. Lab and sandbox use only.
+        role: none
+      baseline:
+        description: Factory baseline (no maintained open-source CIS role exists for Fedora)
+        role: baseline
+        vars_file: baseline-vm.yml
+  container:
+    default: baseline-container
+    profiles:
+      none:
+        description: No hardening, apart from patching and cleanup.
+        role: none
+      baseline-container:
+        description: Factory container baseline (permissions, no setuid extras, non-root ready)
+        role: baseline
+        vars_file: baseline-container.yml
+
+sles-16:
+  vm:
+    default: baseline
+    profiles:
+      none:
+        description: No hardening. Lab and sandbox use only.
+        role: none
+      baseline:
+        description: >-
+          Factory baseline. No open-source CIS role exists for SLES 16 yet;
+          for full CIS, use SUSE's hardened images or OpenSCAP.
+        role: baseline
+        vars_file: baseline-vm.yml
+  container:
+    default: baseline-container
+    profiles:
+      none:
+        description: No hardening, apart from patching and cleanup.
+        role: none
+      baseline-container:
+        description: Factory container baseline (permissions, no setuid extras, non-root ready)
+        role: baseline
+        vars_file: baseline-container.yml
+
+windows-2025:
+  vm:
+    default: cis-l1
+    profiles:
+      none:
+        description: No hardening. Lab and sandbox use only.
+        role: none
+      cis-l1:
+        description: >-
+          CIS Microsoft Windows Server 2025 Benchmark, Level 1 Member Server.
+          Controls that would cut off WinRM during the build are applied by
+          GPO/Intune after deployment (see docs/hardening-exceptions.md).
+        role: windows2025_cis
+        vars_file: windows2025-cis-l1.yml
+        skip_tags: []
+      cis-l2:
+        description: CIS Microsoft Windows Server 2025 Benchmark, Level 1 + Level 2 Member Server
+        role: windows2025_cis
+        vars_file: windows2025-cis-l2.yml
         skip_tags: []

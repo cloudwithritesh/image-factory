@@ -24,3 +24,18 @@ roles:
     src: https://github.com/ansible-lockdown/Windows-2022-CIS.git
     scm: git
     version: "4.2.0" # CIS Microsoft Windows Server 2022 Benchmark
+
+  - name: ubuntu26_cis
+    src: https://github.com/ansible-lockdown/UBUNTU26-CIS.git
+    scm: git
+    version: "0.9.0" # CIS Ubuntu 26.04 LTS Benchmark v1.0.0; first public role release
+
+  - name: rhel10_cis
+    src: https://github.com/ansible-lockdown/RHEL10-CIS.git
+    scm: git
+    version: "1.1.2" # CIS RHEL 10 Benchmark (RHEL, Rocky, Alma)
+
+  - name: windows2025_cis
+    src: https://github.com/ansible-lockdown/Windows-2025-CIS.git
+    scm: git
+    version: "1.2.2" # CIS Microsoft Windows Server 2025 Benchmark

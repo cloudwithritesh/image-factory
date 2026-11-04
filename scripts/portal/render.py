@@ -108,7 +108,7 @@ def collect(repo: str) -> dict:
     return {
         "repo": {"owner": owner, "name": name, "full_name": repo, "url": f"https://github.com/{repo}"},
         "os": {k: {"display_name": v["display_name"], "family": v["family"], "targets": sorted(v["targets"]),
-                   "vendor": v.get("vendor", "Other"), "status": v.get("status", "ga"),
+                   "vendor": v.get("vendor", "Other"), "release": v.get("release", "previous"),
                    "notes": " ".join(str(v.get("notes", "")).split())}
                for k, v in catalogs["os"].items()},
         "hardening": catalogs["hardening"],
@@ -193,7 +193,7 @@ def image_template(data: dict) -> dict:
                                "enum": sorted(data["os"]),
                                "enumNames": [
                                    f"{data['os'][k]['vendor']}: {data['os'][k]['display_name']}"
-                                   + (" (preview)" if data["os"][k]["status"] == "preview" else "")
+                                   + (" (latest)" if data["os"][k]["release"] == "latest" else "")
                                    for k in sorted(data["os"])]},
                         "targets": {"title": "Targets", "type": "array", "uniqueItems": True, "minItems": 1,
                                     "items": {"type": "string", "enum": data["enabled_targets"]},

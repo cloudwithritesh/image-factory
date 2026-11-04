@@ -47,7 +47,7 @@ variable "os_disk_gb" {
 
 variable "admin_username" {
   type    = string
-  default = "azureuser"
+  default = "cloudadmin"
 }
 
 variable "ssh_public_key" {

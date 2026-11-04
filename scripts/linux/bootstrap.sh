@@ -28,6 +28,11 @@ if [ "$IMAGE_KIND" = vm ] && command -v cloud-init > /dev/null 2>&1; then
   log "cloud-init done (rc=$rc)"
 fi
 
+# True when the given Python exists and is new enough for ansible-core
+python_ok() {
+  command -v "$1" > /dev/null 2>&1 && "$1" -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2> /dev/null
+}
+
 retry() {
   # Package mirrors are the most common transient failure; retry 3 times.
   n=1
@@ -53,16 +58,24 @@ case "$PKG_FAMILY" in
     if [ "$pm" = dnf ] && dnf --version 2> /dev/null | grep -q '^dnf5'; then
       pkgs="$pkgs python3-libdnf5"
     fi
-    if [ "$IMAGE_KIND" = container ] || ! command -v python3 > /dev/null 2>&1; then
+    if [ "$IMAGE_KIND" = container ] || ! python_ok python3; then
       # shellcheck disable=SC2086  # $pkgs is a word list
       retry "$pm" -y install $pkgs
     fi
     ;;
   suse)
-    # The system python3 (3.6) is too old for ansible-core; 3.11 is in the
-    # base module of SLES 15 SP7 and in the BCI repository.
-    retry zypper --non-interactive --gpg-auto-import-keys refresh
-    retry zypper --non-interactive install --no-recommends python311
+    # ansible-core needs Python >= 3.9 on the target. SLES 16 ships 3.13;
+    # SLES 15's system python3 is 3.6, so 3.11 is added from its base module.
+    if python_ok python3; then
+      :
+    else
+      retry zypper --non-interactive --gpg-auto-import-keys refresh
+      if grep -q 'VERSION_ID="15' /etc/os-release; then
+        retry zypper --non-interactive install --no-recommends python311
+      else
+        retry zypper --non-interactive install --no-recommends python3
+      fi
+    fi
     ;;
   *)
     log "unknown PKG_FAMILY: $PKG_FAMILY"; exit 1 ;;

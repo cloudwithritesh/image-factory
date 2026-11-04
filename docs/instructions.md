@@ -54,6 +54,34 @@ plan. It's safe to re-run. What it does:
 
 Options: `AZURE_SUBSCRIPTION_ID=… AZURE_LOCATION=… REPO_NAME=… SKIP_FIRST_BUILD=1`.
 
+### 1.2a Deploy AWS (AMIs and EC2 self-service)
+
+You need: an AWS CLI login with admin rights in the factory account
+(`aws configure sso` then `aws sso login`, or `aws configure`), and
+Terraform ≥ 1.10.
+
+```bash
+cd ~/my_work/image-factory
+git switch main && git pull
+./scripts/bootstrap/deploy-github-aws.sh        # AWS_REGION defaults to ap-southeast-1
+```
+
+| Step | Result |
+|---|---|
+| 1 | Checks tools and logins; finds the repo's immutable IDs and any existing GitHub OIDC provider in the account |
+| 2 | S3 state bucket `image-factory-tfstate-<account>-<region>` (versioned, encrypted, public access blocked, TLS only) |
+| 3 | `terraform apply` of `terraform/factory/aws`: OIDC trust, roles `image-factory-packer` and `image-factory-vm-provision`, KMS key, build VPC, workload VPC with NAT gateway, instance profile |
+| 4 | Repository variables: `AWS_BUILD_ROLE_ARN`, `PKR_VAR_aws_*`, `VM_AWS_*`, `TF_STATE_AWS_BUCKET` |
+| 5 | Environments `images-aws` and `images-aws-approval` (you as reviewer) |
+| 6 | A PR `chore(platform): enable aws…` that sets `clouds.aws.enabled: true` and adds `aws` to `ubuntu-2404-base` |
+
+Review and merge that PR: the first AMI builds, is scanned and promoted,
+and the portal starts offering AWS for images and EC2 for VMs.
+
+Options: `AWS_PROFILE=…`, `AWS_REGION=…`, `WORKLOAD_NAT_GATEWAY=false`
+(saves ~USD 35/month, but private instances then have no outbound
+internet), `FIRST_AMI=0` (don't add aws to `ubuntu-2404-base`).
+
 ### 1.3 Portal bot: GitHub App (recommended)
 
 Optional. Without it, portal PRs are opened with `GITHUB_TOKEN` and the
@@ -147,21 +175,25 @@ commit the result, or the `lint` freshness check fails.
 
 ### 2.6 Choose an operating system
 
-| OS | Targets | Notes |
-|---|---|---|
-| Ubuntu 24.04 | AWS, Azure, Docker | CIS L1/L2; the most tested path |
-| RHEL 9 *(preview)* | AWS, Azure, Docker (UBI 9) | pay-as-you-go images; CIS L1/L2 |
-| Red Hat UBI 9 for OpenShift *(preview)* | Docker | runs as UID 1001, group-0 writable app folders |
-| Rocky Linux 9 *(preview)* | AWS, Docker | free RHEL rebuild; CIS L1/L2 |
-| Amazon Linux 2023 *(preview)* | AWS, Docker | CIS L1 |
-| Fedora 44 *(preview)* | AWS, Docker | short support life; developer/CI images |
-| SLES 15 SP7 *(preview)* | AWS, Azure, Docker (SLE BCI) | pay-as-you-go images; factory baseline |
-| Windows Server 2022 *(preview)* | AWS, Azure | 60-120 min builds (Windows Update); CIS L1/L2; image only (no self-service VMs yet) |
+Each vendor's latest stable major release and the one before it:
 
-The portal groups these by vendor and shows the targets, hardening
-profiles and software each one supports. Preview means the build path is
-implemented and validated, but hasn't had its first production build and
-review; treat the first image as a pilot.
+| Vendor | Latest | Previous | Targets | Notes |
+|---|---|---|---|---|
+| Canonical | Ubuntu 26.04 LTS | Ubuntu 24.04 LTS | AWS, Azure, Docker | 26.04 uses the 0.9.0 CIS role on VMs, baseline in containers; 24.04 is the most tested path |
+| Red Hat | RHEL 10 | RHEL 9 | AWS, Azure, Docker (UBI) | pay-as-you-go images; CIS L1/L2 |
+| Red Hat | UBI 10 for OpenShift | UBI 9 for OpenShift | Docker | runs as UID 1001, group-0 writable app folders |
+| Rocky Linux | Rocky 10 | Rocky 9 | AWS, Docker | free RHEL rebuild; CIS L1/L2 |
+| Amazon | Amazon Linux 2023 | – | AWS, Docker | CIS L1 |
+| Fedora Project | Fedora 45 | Fedora 44 | AWS, Docker | ~13 months of updates; developer/CI images |
+| SUSE | SLES 16.0 | SLES 15 SP7 | AWS, Azure, Docker (SLE BCI) | pay-as-you-go images; factory baseline |
+| Microsoft | Windows Server 2025 | Windows Server 2022 | AWS, Azure | 60-120 min builds (Windows Update); CIS L1/L2; image only (no self-service VMs yet) |
+
+The portal groups these by vendor, lists the latest release first and
+shows the targets, hardening profiles and software each one supports.
+Whichever you pick, the build starts from the newest patched base image of
+that release and installs all updates. Only Ubuntu 24.04 has produced
+images through the pipeline so far, so review the first image of any other
+OS before rolling it out widely.
 
 ### 2.7 Add a hardening profile or OS (platform team)
 <a id="add-an-operating-system"></a>
@@ -170,7 +202,7 @@ review; treat the first image as a pilot.
   `docs/hardening-exceptions.md`.
 - OS:
   1. `catalog/os.yaml`: `display_name`, `vendor`, `family` (linux/windows),
-     `pkg_family` (debian/redhat/suse/windows), `status: preview`, and the
+     `pkg_family` (debian/redhat/suse/windows), `release` (latest/previous), and the
      base image per target. Check Azure images with
      `az vm image list --publisher <p> --offer <o> --sku <s> --all -o table`.
   2. `catalog/hardening.yaml`: profiles for `vm` and/or `container`
@@ -178,7 +210,12 @@ review; treat the first image as a pilot.
   3. `catalog/software.yaml`: add the OS key to the items it may use.
   4. `python3 scripts/portal/test_portal.py` (renders every OS), then
      `python3 scripts/portal/render.py backstage` and commit.
-  5. Build it once with `image_request` and move it to `status: ga`.
+  5. Run `python3 scripts/ci/check_base_images.py` (or the `base-images`
+     workflow) to confirm the base images resolve, then build it once with
+     `image_request`.
+  6. When a new major release ships: add it as `latest`, change the old
+     `latest` to `previous`, and retire the old `previous` once no image
+     request uses it.
 
 ---
 
@@ -216,8 +253,13 @@ file from `vms/` by hand: that doesn't remove the VM.
 ```bash
 ssh <admin_user>@<private-or-public-ip>
 ```
-Private-only VMs are reachable from inside the workload VNet
-(`vnet-image-factory-workloads`), e.g. via a jump host, VPN or Azure Bastion.
+Private-only VMs are reachable from inside the workload network: on Azure
+the VNet `vnet-image-factory-workloads` (jump host, VPN or Azure Bastion);
+on AWS the VPC `image-factory-workloads`, or without any network access
+through Session Manager:
+```bash
+aws ssm start-session --region ap-southeast-1 --target <instance id>   # shown in the vm-provision summary
+```
 
 ---
 
@@ -249,7 +291,8 @@ reject, close the PR; the `branch-cleanup` workflow deletes the branch.
 | Upgrade tools (Packer, Syft, Grype, crane, Terraform) | edit `ci/versions.env` (and the ARGs in `ci/Dockerfile` for GitLab); PR `chore(ci): bump …` |
 | Upgrade the CIS role | bump `ansible/requirements.yml`, read the role's changelog, adjust `ansible/vars/hardening/`, rebuild an image on the branch via `image_request` before merging |
 | Change VM sizes, regions, environments | `catalog/vm.yaml`; regenerate Backstage templates |
-| Enable AWS | deploy `terraform/factory/aws`, set its outputs as repository variables, set `clouds.aws.enabled: true`, add `aws` to image targets |
+| Enable AWS | `scripts/bootstrap/deploy-github-aws.sh` (section 1.2a), then merge its PR |
+| Check base images still exist | Actions → base-images → Run workflow (also weekly), or `python3 scripts/ci/check_base_images.py` with your `az`/`aws` logins |
 | Add reviewers or teams | `.github/CODEOWNERS`; Backstage teams in `portal/backstage/org.yaml` |
 | Rotate secrets | nothing to rotate: OIDC everywhere. If you use the GitHub App, rotate its private key in the App settings and `gh secret set` again |
 | Clean old image versions | `az sig image-version delete …` for versions no VM pins (check VM tags `ImageVersion`) |
@@ -275,6 +318,8 @@ reject, close the PR; the `branch-cleanup` workflow deletes the branch.
 | Scan gate fails | fixed vulnerabilities at or above the threshold | rebuild later (patched packages), or adjust `fail_on_severity` in the request after review |
 | VM apply: "isn't approved (it hasn't passed the vulnerability gate)" | pinned `image_version` is a candidate | use `latest` or a promoted version |
 | Public-IP VM unreachable | wrong source range | update the VM with the correct `allowed_ssh_cidr` |
+| VM request: "isn't built for aws" | the image has no `aws` target | add `aws` to the image (portal → Golden image), wait for the AMI to be promoted |
+| base-images: `MISSING` | the vendor renamed a SKU or AMI | fix the entry in `catalog/os.yaml`; `az vm image list --publisher …` / `aws ec2 describe-images --owners …` show the current names |
 | portal-pages: "Ensure GitHub Pages has been enabled" | Pages not turned on | run `scripts/bootstrap/configure-github-repo.sh` |
 | configure script: "couldn't create the ruleset" | private repo on GitHub Free | make the repo public or use a paid plan |
 | Portal shows old options | Pages not redeployed | Actions → portal-pages → Run workflow |

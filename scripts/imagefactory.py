@@ -171,6 +171,8 @@ def validate_request(req: dict, catalogs: dict, source: str = "") -> list[str]:
         return [f"spec/os: '{os_key}' is not in catalog/os.yaml (known: {sorted(catalogs['os'])})"]
 
     family, pkg_family = os_entry.get("family"), os_entry.get("pkg_family")
+    if os_entry.get("release", "previous") not in {"latest", "previous"}:
+        return [f"catalog: {os_key} release must be 'latest' or 'previous'"]
     if family not in {"linux", "windows"} or pkg_family not in PKG_FAMILIES:
         return [f"catalog: {os_key} needs family (linux|windows) and pkg_family ({'|'.join(sorted(PKG_FAMILIES))})"]
 
@@ -352,7 +354,7 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
         "os": os_key,
         "family": family,
         "pkg_family": pkg_family,
-        "status": os_entry.get("status", "ga"),
+        "release": os_entry.get("release", "previous"),
         # Packer template folder; its build block is named after the family
         "packer_template": f"packer/{family}",
         "targets": targets,

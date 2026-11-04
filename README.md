@@ -14,12 +14,14 @@ request YAML ─► validate ─► Packer build (AWS │ Azure │ Docker) ─�
      └── self-service portal (Backstage, phase 3) opens a PR with the request
 ```
 
-Status: **phases 1–4**: golden images for Ubuntu 24.04 (ga) and, in preview, RHEL 9, Rocky 9,
-Amazon Linux 2023, Fedora 44, SLES 15 SP7, Red Hat UBI 9 for OpenShift and Windows Server 2022
-(Azure + Docker live, AWS ready), plus a self-service portal (GitHub Pages + local Backstage) where
-DevOps request images and end users request VMs. Every request becomes a reviewed pull request
-([portal/README.md](portal/README.md)) that can only merge after a code-owner approval and green
-checks. Every step logs structured events for troubleshooting ([docs/logging.md](docs/logging.md)).
+Status: **phases 1–4**: golden images for each vendor's latest and previous stable release:
+Ubuntu 26.04/24.04, RHEL 10/9, Rocky 10/9, Amazon Linux 2023, Fedora 45/44, SLES 16/15, UBI 10/9 for
+OpenShift and Windows Server 2025/2022, on Azure, AWS and Docker. Plus a self-service portal (GitHub
+Pages + local Backstage) where DevOps request images and end users request Azure VMs or EC2
+instances. Every request becomes a reviewed pull request ([portal/README.md](portal/README.md)) that
+can only merge after a code-owner approval and green checks. Every step logs structured events for
+troubleshooting ([docs/logging.md](docs/logging.md)). AWS goes live after
+`scripts/bootstrap/deploy-github-aws.sh` ([instructions](docs/instructions.md#12a-deploy-aws-amis-and-ec2-self-service)).
 
 | Portal | Where |
 |---|---|
@@ -91,6 +93,7 @@ scripts/              imagefactory.py (validate/render/plan), CI scripts, VM/con
 ci/                   versions.env (tool pins), GitLab toolbox Dockerfile, Python requirements
 terraform/factory/    one-time AWS and Azure foundations (OIDC trust, network, gallery, KMS, VM landing zone)
 terraform/vm/azure/   one end-user VM from the latest promoted image (used by vm-provision)
+terraform/vm/aws/     one end-user EC2 instance from the latest promoted AMI (used by vm-provision)
 docs/                 architecture, workflows, instructions, standards, logging, hardening exceptions
 .claude/              CLAUDE.md (project guide for Claude Code) and issues.md (lessons learned)
 ```
@@ -107,6 +110,16 @@ The script creates the repo, the Terraform state storage and the Azure
 foundation (it shows the plan and asks first), sets the repository
 variables and environments, pushes the code, and starts the first build.
 It's safe to re-run. The manual steps below explain what it does, and cover AWS.
+
+Then AWS, on a machine where `aws` and `gh` are logged in:
+
+```bash
+scripts/bootstrap/deploy-github-aws.sh   # ap-southeast-1 by default
+```
+
+It creates the S3 state bucket and the AWS foundation (OIDC roles, KMS key,
+build and workload VPCs), sets the AWS repository variables and
+environments, and opens a PR that turns AWS on in the portal.
 
 ## Set up on GitHub (once)
 
@@ -256,7 +269,7 @@ in one place.
 ## Roadmap
 
 1. ✅ Factory core: Ubuntu 24.04 on AWS, Azure and Docker; CIS L1/L2; SBOM; Grype gate; promotion; GitHub and GitLab pipelines
-2. ✅ More operating systems (preview): RHEL 9, Rocky 9, Amazon Linux 2023, Fedora 44, SLES 15 SP7, UBI 9 for OpenShift, Windows Server 2022 (WinRM, sysprep, CIS); next: first production builds → `ga`, Windows VMs
+2. ✅ More operating systems, latest + previous major release of each (WinRM, sysprep, CIS); next: Windows VMs
 3. ✅ Self-service portal: GitHub Pages + Backstage forms → standard PRs (image requests)
-4. ✅ VM self-service on Azure (Terraform per VM, latest promoted image); AWS EC2 module next
+4. ✅ VM self-service on Azure and AWS (Terraform per VM, latest promoted image)
 5. Entra ID sign-in for Backstage, and hosting it (Azure Container Apps)

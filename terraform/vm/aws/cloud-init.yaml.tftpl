@@ -1,0 +1,13 @@
+#cloud-config
+# Rendered by terraform/vm/aws. Creates the requested admin user; the
+# image's own default user keeps working only with the same key pair.
+hostname: ${hostname}
+users:
+  - default
+  - name: ${admin_username}
+    groups: [adm]
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    shell: /bin/bash
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ssh_public_key}

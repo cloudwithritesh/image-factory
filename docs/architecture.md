@@ -173,7 +173,11 @@ one run.
 
 ### 3.5 VM provisioning
 
-`terraform/vm/azure` builds one VM per state file (`vms/<name>.tfstate`):
+One module per cloud, one state file per VM (`vms/<name>.tfstate`), the
+same request fields for both. `vm-provision` picks the module from the
+request's `cloud`.
+
+**Azure** (`terraform/vm/azure`, state in the factory's Azure storage):
 
 - **Image:** `azurerm_shared_image_version` with `latest` (newest promoted) or
   a pinned version. A postcondition requires `Status=approved`, so a pinned
@@ -191,13 +195,33 @@ one run.
 - **Lifecycle:** `state: present` → apply; `state: absent` → destroy. The file
   stays as a record; deleting it does nothing (the workflow warns).
 
+**AWS** (`terraform/vm/aws`, state in the factory's S3 bucket):
+
+- **Image:** the AMI ID from the SSM catalog the promote job writes
+  (`/image-factory/<image>/latest` or `/versions/<version>`), so only promoted
+  AMIs can be used; a postcondition also checks the AMI's `Status=approved`
+  tag and refuses Windows AMIs.
+- **Pinning:** as on Azure, via `terraform_data.image`.
+- **Network:** the workload VPC from `terraform/factory/aws` (two AZs).
+  Private subnet by default (outbound through the NAT gateway); public
+  subnet with a public IP only when requested, with SSH from the requested
+  range. One security group per instance: all traffic from inside the VPC,
+  SSH from the range, all outbound.
+- **Access:** SSH key (an EC2 key pair per VM, plus a cloud-init user with
+  the requested name), IMDSv2 only, and an instance profile with
+  `AmazonSSMManagedInstanceCore`, so Session Manager works without SSH or a
+  public IP.
+- **Disk:** gp3 root volume encrypted with the factory KMS key.
+- **Guardrail:** the `image-factory-vm-provision` role trusts `main` only and
+  may change only resources tagged `ManagedBy=image-factory`.
+
 ### 3.6 Foundation (Terraform, applied once by the deploy script)
 
 | Module | Creates |
 |---|---|
 | `terraform/factory/azure` | `rg-image-factory-gallery` + gallery `sig_image_factory`; `rg-image-factory-build`; VM landing zone `rg-image-factory-vms` + VNet `10.60.0.0/16` + subnet `snet-workloads`; Entra app `image-factory-ci` + service principal + **federated credentials**; Contributor on the three RGs; Storage Blob Data Contributor on the state account |
-| `terraform/factory/aws` | GitHub/GitLab OIDC providers + IAM role, KMS key for shareable encrypted AMIs, build VPC (ready; enable later) |
-| bootstrap script | Terraform state storage `rg-image-factory-tfstate` / `stimgfac<hash>` (versioned blobs) |
+| `terraform/factory/aws` | GitHub (immutable subjects) / GitLab OIDC trust; IAM roles `image-factory-packer` (build + promote; main and `images-aws(-approval)`) and `image-factory-vm-provision` (main only, tag-scoped); KMS key for shareable encrypted AMIs; build VPC `10.250.0.0/20`; workload VPC `10.70.0.0/16` (public + private subnets in two AZs, optional NAT gateway); instance profile `image-factory-instance` (SSM) |
+| bootstrap scripts | `deploy-github-azure.sh`: state storage `rg-image-factory-tfstate` / `stimgfac<hash>` (versioned blobs). `deploy-github-aws.sh`: S3 bucket `image-factory-tfstate-<account>-<region>` (versioned, encrypted, TLS-only, S3 native locking) |
 
 ---
 
@@ -206,7 +230,7 @@ one run.
 | Concern | Control |
 |---|---|
 | Cloud credentials | None stored. OIDC federation: GitHub → Entra ID (and AWS IAM). Repos created after 2026-07-15 use **immutable subjects** `repo:<owner>@<owner_id>/<repo>@<repo_id>:…`, so a renamed or recycled repo name can't inherit trust. |
-| Who can trigger cloud changes | Only workflows on `main` (`ref:refs/heads/main`) and in the environments `images-<target>` / `images-<target>-approval`. PRs and forks get no cloud access. |
+| Who can trigger cloud changes | Only workflows on `main` (`ref:refs/heads/main`) and in the environments `images-<target>` / `images-<target>-approval`. PRs and forks get no cloud access. On AWS, image builds and VM provisioning use separate roles. |
 | Who can submit portal requests | Issues: only OWNER/MEMBER/COLLABORATOR (checked in the workflow `if` **and** in the processor). Backstage: users with a GitHub token that can dispatch workflows. |
 | Untrusted input | The issue body is read from the event file, never interpolated into shell. Names are pattern-checked before being used in paths. Everything is schema- and catalog-validated. |
 | Change approval | Ruleset on `main`: PR required, 1 approval incl. CODEOWNERS, required checks `pr-standards` + `lint` + `plan`, linear history, no force-push or deletion. **No bypass, admins included**: the merge button stays disabled until approval and green checks. |
@@ -233,16 +257,29 @@ one run.
 
 ### 5.1 Operating systems
 
-| OS (catalog key) | Vendor | AWS | Azure | Docker base | Default hardening (VM / container) | Status |
-|---|---|---|---|---|---|---|
-| `ubuntu-2404` | Canonical | ✓ | ✓ `Canonical:ubuntu-24_04-lts:server` | `ubuntu:24.04` | CIS L1 / CIS L1 container | ga |
-| `rhel-9` | Red Hat | ✓ (PAYG) | ✓ `RedHat:RHEL:9-lvm-gen2` | UBI 9 | CIS L1 / baseline | preview |
-| `ubi9-openshift` | Red Hat | | | UBI 9 (UID 1001) | – / openshift | preview |
-| `rocky-9` | Rocky Linux | ✓ | (marketplace plan needed) | `rockylinux:9` | CIS L1 / baseline | preview |
-| `amazonlinux-2023` | Amazon | ✓ | | `amazonlinux:2023` | CIS L1 / baseline | preview |
-| `fedora-44` | Fedora Project | ✓ | (no official image) | `fedora:44` | baseline / baseline | preview |
-| `sles-15` | SUSE | ✓ (PAYG) | ✓ `SUSE:sles-15-sp7:gen2` | SLE BCI 15.7 | baseline / baseline | preview |
-| `windows-2022` | Microsoft | ✓ | ✓ `MicrosoftWindowsServer:WindowsServer:2022-datacenter-azure-edition` | | CIS L1 / – | preview |
+The catalog offers each vendor's **latest** stable major release and the
+**previous** one (N and N-1), so existing images keep building while teams
+move up. Every build starts from the newest patched base image of that
+release and applies all updates on top. `base-images` (weekly) checks that
+every base image below still resolves.
+
+| OS (catalog key) | Release | AWS | Azure | Docker base | Default hardening (VM / container) |
+|---|---|---|---|---|---|
+| `ubuntu-2604` | latest | ✓ | `Canonical:ubuntu-26_04-lts:server` | `ubuntu:26.04` | CIS L1 (0.9.0 role) / baseline |
+| `ubuntu-2404` | previous | ✓ | `Canonical:ubuntu-24_04-lts:server` | `ubuntu:24.04` | CIS L1 / CIS L1 container |
+| `rhel-10` | latest | ✓ (PAYG) | `RedHat:RHEL:10-lvm-gen2` | UBI 10 | CIS L1 / baseline |
+| `rhel-9` | previous | ✓ (PAYG) | `RedHat:RHEL:9-lvm-gen2` | UBI 9 | CIS L1 / baseline |
+| `ubi10-openshift` | latest | | | UBI 10 (UID 1001) | – / openshift |
+| `ubi9-openshift` | previous | | | UBI 9 (UID 1001) | – / openshift |
+| `rocky-10` | latest | ✓ | (marketplace plan needed) | `rockylinux:10` | CIS L1 / baseline |
+| `rocky-9` | previous | ✓ | (marketplace plan needed) | `rockylinux:9` | CIS L1 / baseline |
+| `amazonlinux-2023` | latest | ✓ | | `amazonlinux:2023` | CIS L1 / baseline |
+| `fedora-45` | latest | ✓ | (no official image) | `fedora:45` | baseline / baseline |
+| `fedora-44` | previous | ✓ | (no official image) | `fedora:44` | baseline / baseline |
+| `sles-16` | latest | ✓ (PAYG) | `SUSE:sles-16-0-basic-x86-64:gen2` | SLE BCI 16.0 | baseline / baseline |
+| `sles-15` | previous | ✓ (PAYG) | `SUSE:sles-15-sp7:gen2` | SLE BCI 15.7 | baseline / baseline |
+| `windows-2025` | latest | ✓ | `MicrosoftWindowsServer:WindowsServer:2025-datacenter-azure-edition` | | CIS L1 / – |
+| `windows-2022` | previous | ✓ | `MicrosoftWindowsServer:WindowsServer:2022-datacenter-azure-edition` | | CIS L1 / – |
 
 The OS entry's `family` picks the Packer template and `pkg_family` the
 package manager (apt, dnf, zypper, Chocolatey). Adding an OS is a catalog
@@ -295,12 +332,11 @@ Azure, independent of the CI platform.
 
 ## 8. Known limitations and roadmap
 
-- AWS: code ready (AMI build, OIDC, KMS, SSM catalog); turn on by deploying
-  `terraform/factory/aws` and setting `clouds.aws.enabled: true`. EC2
-  provisioning module still to come.
-- Operating systems in preview (catalog `status: preview`): RHEL 9, Rocky 9,
-  Amazon Linux 2023, Fedora 44, SLES 15 SP7, UBI 9 for OpenShift, Windows
-  Server 2022. They become `ga` after a first successful build and review.
+- AWS: AMI builds and EC2 self-service are implemented; they go live when
+  `scripts/bootstrap/deploy-github-aws.sh` has run and its PR (which sets
+  `clouds.aws.enabled: true`) is merged.
+- Only Ubuntu 24.04 has produced images through the pipeline so far; treat
+  the first image of every other OS as a pilot and review it before wide use.
 - Self-service VMs are Linux only: Windows VMs need a credential flow
   (e.g. password in Key Vault, Entra login) before `terraform/vm/azure` can
   create them.

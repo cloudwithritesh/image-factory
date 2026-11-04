@@ -2,7 +2,9 @@
 # VM provisioning: applies vms/<name>.yaml after its PR is merged.
 #   state: present  -> terraform apply  (create or update)
 #   state: absent   -> terraform destroy (decommission; the file stays as a record)
-# One Terraform state per VM: vms/<name>.tfstate in the factory state account.
+# One Terraform state per VM: vms/<name>.tfstate
+#   azure: terraform/vm/azure, state in the factory's Azure storage account
+#   aws:   terraform/vm/aws,   state in the factory's S3 bucket
 # The PR approval is the gate, so this runs straight away on merge.
 # Runs are serialised per VM (job-level concurrency below).
 # =============================================================================
@@ -27,11 +29,19 @@ permissions:
   contents: read
 
 env:
+  # Azure platform settings (terraform/vm/azure)
   TF_VAR_subscription_id: ${{ vars.PKR_VAR_azure_subscription_id }}
   TF_VAR_resource_group_name: ${{ vars.VM_RESOURCE_GROUP }}
   TF_VAR_subnet_id: ${{ vars.VM_SUBNET_ID }}
   TF_VAR_gallery_resource_group: ${{ vars.PKR_VAR_azure_gallery_resource_group }}
   TF_VAR_gallery_name: ${{ vars.PKR_VAR_azure_gallery_name }}
+  # AWS platform settings (terraform/vm/aws)
+  TF_VAR_vpc_id: ${{ vars.VM_AWS_VPC_ID }}
+  TF_VAR_private_subnet_ids: ${{ vars.VM_AWS_PRIVATE_SUBNET_IDS }}
+  TF_VAR_public_subnet_ids: ${{ vars.VM_AWS_PUBLIC_SUBNET_IDS }}
+  TF_VAR_instance_profile: ${{ vars.VM_AWS_INSTANCE_PROFILE }}
+  TF_VAR_kms_key_id: ${{ vars.PKR_VAR_aws_kms_key_id }}
+  TF_VAR_catalog_ssm_prefix: ${{ vars.CATALOG_SSM_PREFIX || '/image-factory' }}
   TF_IN_AUTOMATION: "true"
   # Logging: see docs/logging.md
   FACTORY_LOG_LEVEL: ${{ inputs.debug && 'debug' || vars.FACTORY_LOG_LEVEL || 'info' }}
@@ -94,7 +104,6 @@ jobs:
       run:
         # explicit bash = -eo pipefail, so "terraform ... | tee" keeps the exit code
         shell: bash
-        working-directory: terraform/vm/azure
     env:
       LOG_DIR: ${{ github.workspace }}/build/logs/vm-${{ matrix.vm }}
     steps:
@@ -127,14 +136,11 @@ jobs:
         env:
           VM: ${{ matrix.vm }}
         run: |
-          python3 "${GITHUB_WORKSPACE}/scripts/portal/vm_tfvars.py" "${GITHUB_WORKSPACE}/vms/${VM}.yaml" \
-            --out request.auto.tfvars.json | tee -a "$GITHUB_OUTPUT"
-
-      - name: Only Azure is wired up so far
-        if: steps.request.outputs.cloud != 'azure'
-        run: |
-          echo "::error::cloud '${{ steps.request.outputs.cloud }}' has no provisioning module yet"
-          exit 1
+          cloud="$(python3 -c 'import sys, yaml; print(yaml.safe_load(open(sys.argv[1]))["spec"]["cloud"])' "vms/${VM}.yaml")"
+          [[ -d "terraform/vm/${cloud}" ]] || { echo "::error::cloud '${cloud}' has no provisioning module"; exit 1; }
+          python3 scripts/portal/vm_tfvars.py "vms/${VM}.yaml" \
+            --out "terraform/vm/${cloud}/request.auto.tfvars.json" | tee -a "$GITHUB_OUTPUT"
+          echo "dir=terraform/vm/${cloud}" >> "$GITHUB_OUTPUT"
 
       - name: Read Terraform version
         id: tf
@@ -146,31 +152,50 @@ jobs:
           terraform_wrapper: false
 
       - name: Azure login (OIDC)
+        if: steps.request.outputs.cloud == 'azure'
         uses: azure/login@v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.PKR_VAR_azure_subscription_id }}
 
+      - name: AWS credentials (OIDC)
+        if: steps.request.outputs.cloud == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.VM_AWS_ROLE_ARN }}
+          aws-region: ${{ vars.PKR_VAR_aws_region }}
+          role-session-name: vm-provision-${{ github.run_id }}
+
       - name: Terraform init
+        working-directory: ${{ steps.request.outputs.dir }}
         env:
           VM: ${{ matrix.vm }}
+          CLOUD: ${{ steps.request.outputs.cloud }}
           STATE_RG: ${{ vars.TF_STATE_RESOURCE_GROUP }}
           STATE_SA: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+          STATE_BUCKET: ${{ vars.TF_STATE_AWS_BUCKET }}
+          AWS_STATE_REGION: ${{ vars.PKR_VAR_aws_region }}
         run: |
-          terraform init -input=false \
-            -backend-config="resource_group_name=${STATE_RG}" \
-            -backend-config="storage_account_name=${STATE_SA}" \
-            -backend-config="container_name=tfstate" \
-            -backend-config="key=vms/${VM}.tfstate" \
-            -backend-config="use_azuread_auth=true" 2>&1 | tee "${LOG_DIR}/terraform-init.log"
+          if [[ "$CLOUD" == "aws" ]]; then
+            backend=(-backend-config="bucket=${STATE_BUCKET}" -backend-config="key=vms/${VM}.tfstate"
+                     -backend-config="region=${AWS_STATE_REGION}" -backend-config="use_lockfile=true"
+                     -backend-config="encrypt=true")
+          else
+            backend=(-backend-config="resource_group_name=${STATE_RG}" -backend-config="storage_account_name=${STATE_SA}"
+                     -backend-config="container_name=tfstate" -backend-config="key=vms/${VM}.tfstate"
+                     -backend-config="use_azuread_auth=true")
+          fi
+          terraform init -input=false "${backend[@]}" 2>&1 | tee "${LOG_DIR}/terraform-init.log"
 
       - name: Terraform apply
         if: steps.request.outputs.state == 'present'
+        working-directory: ${{ steps.request.outputs.dir }}
         run: terraform apply -input=false -auto-approve -no-color 2>&1 | tee "${LOG_DIR}/terraform-apply.log"
 
       - name: Terraform destroy (decommission)
         if: steps.request.outputs.state == 'absent'
+        working-directory: ${{ steps.request.outputs.dir }}
         run: terraform destroy -input=false -auto-approve -no-color 2>&1 | tee "${LOG_DIR}/terraform-destroy.log"
 
       - name: Failure triage
@@ -188,7 +213,8 @@ jobs:
           retention-days: ${{ inputs.debug && 7 || 90 }}
 
       - name: Summary
-        if: always()
+        if: always() && steps.request.outputs.dir != ''
+        working-directory: ${{ steps.request.outputs.dir }}
         env:
           VM: ${{ matrix.vm }}
           STATE: ${{ steps.request.outputs.state }}

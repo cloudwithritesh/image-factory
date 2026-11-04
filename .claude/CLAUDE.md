@@ -17,8 +17,13 @@ A golden-image factory and self-service portal, all driven by pull requests:
   the latest *approved* image (Linux only for now).
 - **Portals** (GitHub Pages; Backstage locally) never write to `main`: they
   open a PR on a short-lived branch that a code owner approves.
-- Live: GitHub Actions + Azure (`southeastasia`) + GHCR. AWS and GitLab are
-  implemented but not switched on.
+- Live: GitHub Actions + Azure (`southeastasia`) + GHCR. AWS (`ap-southeast-1`)
+  is implemented end to end (AMIs + EC2) and goes live when
+  `scripts/bootstrap/deploy-github-aws.sh` has run and its PR is merged.
+  GitLab is implemented but not switched on.
+- **OS policy:** the catalog offers each vendor's latest stable major
+  release and the previous one (`release: latest | previous`). When a new
+  major ships, add it as latest, demote the old one, retire N-2.
 
 ## Map
 
@@ -35,8 +40,9 @@ A golden-image factory and self-service portal, all driven by pull requests:
 | `packer/linux`, `packer/windows` | one template per OS family; build block named after the family |
 | `ansible/image.yml`, `ansible/windows.yml` | provisioning; roles `base`, `software`, `baseline`, `openshift`; CIS roles from `requirements.yml` |
 | `terraform/factory/azure` | gallery, build RG, VM landing zone, Entra app + federated credentials |
-| `terraform/vm/azure` | one VM |
-| `.github/workflows/` | `image-factory`, `portal-request`, `pr-standards`, `vm-provision`, `portal-pages`, `branch-cleanup` |
+| `terraform/vm/azure`, `terraform/vm/aws` | one VM / one EC2 instance (same request fields) |
+| `terraform/factory/aws` | OIDC roles (packer, vm-provision), KMS, build VPC, workload VPC, instance profile |
+| `.github/workflows/` | `image-factory`, `portal-request`, `pr-standards`, `vm-provision`, `portal-pages`, `branch-cleanup`, `base-images` |
 
 ## Commands
 
@@ -47,6 +53,7 @@ python3 scripts/portal/test_portal.py                     # portal + every-OS re
 python3 scripts/portal/validate_all.py
 python3 scripts/portal/render.py backstage                # regenerate templates (commit them!)
 python3 scripts/portal/render.py backstage --check
+python3 scripts/ci/check_base_images.py                   # needs az/aws logins
 yamllint -c .yamllint.yml .
 shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/linux/*.sh scripts/container/*.sh scripts/bootstrap/*.sh scripts/portal/*.sh
 actionlint .github/workflows/*.yml
@@ -112,6 +119,9 @@ Never run VM-kind tasks in a chroot (sysctl/modprobe would change the host).
 - Azure: subscription `rhegdecloud-mvp-subscription`, region
   `southeastasia`, gallery `sig_image_factory`, RGs
   `rg-image-factory-{gallery,build,vms,tfstate}`.
+- AWS: region `ap-southeast-1`; state bucket `image-factory-tfstate-<account>-<region>`;
+  roles `image-factory-packer` (builds, main + `images-aws*`) and
+  `image-factory-vm-provision` (main only, may only touch `ManagedBy=image-factory`).
 - Image versions: `YYYY.(MM*100+DD).<run number>`.
 
 ## When working from a Claude session

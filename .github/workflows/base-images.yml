@@ -1,0 +1,58 @@
+# Weekly check that every base image in catalog/os.yaml still exists on
+# Azure and AWS (scripts/ci/check_base_images.py). Catches renamed SKUs and
+# AMI naming changes before an image build fails. Runs on main only, where
+# the OIDC trust allows read access.
+name: base-images
+
+on:
+  schedule:
+    - cron: "41 1 * * 1" # Mondays 09:41 SGT
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    env:
+      FACTORY_LOG_DIR: ${{ github.workspace }}/build/logs
+      PKR_VAR_azure_gallery_location: ${{ vars.PKR_VAR_azure_gallery_location }}
+      PKR_VAR_aws_region: ${{ vars.PKR_VAR_aws_region }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install pyyaml==6.0.3
+
+      - name: Azure login (OIDC)
+        if: vars.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.PKR_VAR_azure_subscription_id }}
+
+      - name: AWS credentials (OIDC)
+        if: vars.AWS_BUILD_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_BUILD_ROLE_ARN }}
+          aws-region: ${{ vars.PKR_VAR_aws_region }}
+
+      - name: Check base images
+        run: python3 scripts/ci/check_base_images.py
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-base-images-${{ github.run_id }}
+          path: build/logs/
+          if-no-files-found: ignore
+          retention-days: 30

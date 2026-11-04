@@ -1,0 +1,15 @@
+---
+# Shared overrides for ansible-lockdown/Windows-2025-CIS 1.2.2
+# (CIS Microsoft Windows Server 2025 Benchmark). See docs/hardening-exceptions.md.
+
+# No reboot in the middle of the role; Packer restarts afterwards.
+skip_reboot: true
+
+# Member server (not a domain controller).
+win25cis_system_role: memberserver
+
+# EXCEPTION (13 controls): win_skip_for_test keeps the controls that would
+# cut off WinRM/Ansible during the build, or break the reboot, out of the
+# image: 2.2.3, 2.2.22, 2.2.26, 2.2.27, 2.3.1.3, 9.3.4, 18.10.89.1.1-3,
+# 18.10.89.2.1-3, 18.10.90.1. Apply them after deployment with GPO or Intune.
+win_skip_for_test: true

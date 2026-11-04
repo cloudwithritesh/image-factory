@@ -11,13 +11,17 @@
 #   family         linux | windows   -> Packer template packer/<family>/
 #   pkg_family     debian | redhat | suse | windows -> package manager and
 #                  paths used by Ansible and the bootstrap/cleanup scripts
-#   status         ga | preview  (preview = builds, but not yet proven in
-#                  production; the portal shows a badge)
+#   release        latest | previous: the vendor's newest stable major
+#                  release, or the one before it. The catalog offers both
+#                  (N and N-1) so existing images keep building while teams
+#                  move up. Every build starts from the newest patched base
+#                  image of that release and applies all updates on top.
 #   ansible_python interpreter on the target, when the default python3 is too
 #                  old for the pinned ansible-core (optional)
 #   notes          one line shown in the portal (optional)
 #   targets        base image per target (aws | azure | docker)
 #
+# Check every base image resolves: scripts/bootstrap/check-base-images.sh
 # Add an OS: add a key here, a hardening entry in hardening.yaml, and list
 # it under the software items it may use in software.yaml.
 # Check a new Azure base image with:
@@ -25,12 +29,35 @@
 # -----------------------------------------------------------------------------
 
 # ---- Canonical ----------------------------------------------------------------
+ubuntu-2604:
+  display_name: Ubuntu 26.04 LTS
+  vendor: Canonical
+  family: linux
+  pkg_family: debian
+  release: latest
+  notes: >-
+    Released April 2026. AMD64 images need x86-64-v3 CPUs (Haswell and
+    newer), which every offered VM size has. The CIS role for 26.04 is 0.9.0
+    (the first public release); exceptions are in docs/hardening-exceptions.md.
+  targets:
+    aws:
+      source_ami_filter_name: "ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*"
+      source_ami_owners: ["099720109477"] # Canonical
+      ssh_username: ubuntu
+    azure:
+      image_publisher: Canonical
+      image_offer: ubuntu-26_04-lts
+      image_sku: server # Gen2
+      hyper_v_generation: V2
+    docker:
+      base_image: "docker.io/library/ubuntu:26.04"
+
 ubuntu-2404:
   display_name: Ubuntu 24.04 LTS
   vendor: Canonical
   family: linux
   pkg_family: debian
-  status: ga
+  release: previous
   targets:
     aws:
       source_ami_filter_name: "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
@@ -47,12 +74,34 @@ ubuntu-2404:
       base_image: "docker.io/library/ubuntu:24.04"
 
 # ---- Red Hat --------------------------------------------------------------------
+rhel-10:
+  display_name: Red Hat Enterprise Linux 10
+  vendor: Red Hat
+  family: linux
+  pkg_family: redhat
+  release: latest
+  notes: >-
+    Pay-as-you-go cloud images (RHEL subscription included in the VM price).
+    The container target uses the freely redistributable UBI 10 base image.
+  targets:
+    aws:
+      source_ami_filter_name: "RHEL-10.*_HVM-*-x86_64-*-Hourly2-GP3"
+      source_ami_owners: ["309956199498"] # Red Hat
+      ssh_username: ec2-user
+    azure:
+      image_publisher: RedHat
+      image_offer: RHEL
+      image_sku: 10-lvm-gen2
+      hyper_v_generation: V2
+    docker:
+      base_image: "registry.access.redhat.com/ubi10/ubi:latest"
+
 rhel-9:
   display_name: Red Hat Enterprise Linux 9
   vendor: Red Hat
   family: linux
   pkg_family: redhat
-  status: preview
+  release: previous
   notes: >-
     Pay-as-you-go cloud images (RHEL subscription included in the VM price).
     The container target uses the freely redistributable UBI 9 base image.
@@ -69,12 +118,28 @@ rhel-9:
     docker:
       base_image: "registry.access.redhat.com/ubi9/ubi:latest"
 
+ubi10-openshift:
+  display_name: Red Hat UBI 10 for OpenShift (container)
+  vendor: Red Hat
+  family: linux
+  pkg_family: redhat
+  release: latest
+  notes: >-
+    Container base image that follows the OpenShift image guidelines: runs as
+    a non-root user (UID 1001) and works with OpenShift's random UIDs
+    (group 0 owns the app folders).
+  targets:
+    docker:
+      base_image: "registry.access.redhat.com/ubi10/ubi:latest"
+      user: "1001"
+      workdir: /opt/app-root/src
+
 ubi9-openshift:
   display_name: Red Hat UBI 9 for OpenShift (container)
   vendor: Red Hat
   family: linux
   pkg_family: redhat
-  status: preview
+  release: previous
   notes: >-
     Container base image that follows the OpenShift image guidelines: runs as
     a non-root user (UID 1001) and works with OpenShift's random UIDs
@@ -87,12 +152,29 @@ ubi9-openshift:
       workdir: /opt/app-root/src
 
 # ---- Rocky Enterprise Software Foundation --------------------------------------------
+rocky-10:
+  display_name: Rocky Linux 10
+  vendor: Rocky Linux
+  family: linux
+  pkg_family: redhat
+  release: latest
+  notes: >-
+    Free RHEL 10-compatible rebuild. Azure isn't offered because the Rocky
+    marketplace image needs a plan agreement per subscription.
+  targets:
+    aws:
+      source_ami_filter_name: "Rocky-10-EC2-Base-10.*.x86_64"
+      source_ami_owners: ["792107900819"] # Rocky Enterprise Software Foundation
+      ssh_username: rocky
+    docker:
+      base_image: "docker.io/rockylinux/rockylinux:10"
+
 rocky-9:
   display_name: Rocky Linux 9
   vendor: Rocky Linux
   family: linux
   pkg_family: redhat
-  status: preview
+  release: previous
   notes: >-
     Free RHEL-compatible rebuild. Azure isn't offered because the Rocky
     marketplace image needs a plan agreement per subscription.
@@ -110,7 +192,7 @@ amazonlinux-2023:
   vendor: Amazon
   family: linux
   pkg_family: redhat
-  status: preview
+  release: latest # Amazon Linux 2023 is the current release
   targets:
     aws:
       source_ami_filter_name: "al2023-ami-2023.*-kernel-*-x86_64"
@@ -120,12 +202,30 @@ amazonlinux-2023:
       base_image: "public.ecr.aws/amazonlinux/amazonlinux:2023"
 
 # ---- Fedora Project ------------------------------------------------------------------
+fedora-45:
+  display_name: Fedora 45
+  vendor: Fedora Project
+  family: linux
+  pkg_family: redhat
+  release: latest
+  notes: >-
+    Released 3 November 2026, supported until about December 2027. Good for
+    developer and CI images; prefer RHEL or Rocky for long-lived servers.
+    No official Azure image exists.
+  targets:
+    aws:
+      source_ami_filter_name: "Fedora-Cloud-Base-AmazonEC2.x86_64-45-*"
+      source_ami_owners: ["125523088429"] # Fedora Project
+      ssh_username: fedora
+    docker:
+      base_image: "registry.fedoraproject.org/fedora:45"
+
 fedora-44:
   display_name: Fedora 44
   vendor: Fedora Project
   family: linux
   pkg_family: redhat
-  status: preview
+  release: previous
   notes: >-
     Fast-moving community release (about 13 months of updates). Good for
     developer and CI images; prefer RHEL or Rocky for long-lived servers.
@@ -139,12 +239,35 @@ fedora-44:
       base_image: "registry.fedoraproject.org/fedora:44"
 
 # ---- SUSE ---------------------------------------------------------------------------
+sles-16:
+  display_name: SUSE Linux Enterprise Server 16.0
+  vendor: SUSE
+  family: linux
+  pkg_family: suse
+  release: latest
+  notes: >-
+    Pay-as-you-go cloud images (the "+Patching" offer on Azure). SELinux is
+    on by default and /tmp is a tmpfs. The container target uses the SLE BCI
+    16 base image.
+  targets:
+    aws:
+      source_ami_filter_name: "suse-sles-16-0-v????????-hvm-ssd-x86_64" # skips -ecs/-byos/app variants
+      source_ami_owners: ["013907871322"] # SUSE
+      ssh_username: ec2-user
+    azure:
+      image_publisher: SUSE
+      image_offer: sles-16-0-basic-x86-64
+      image_sku: gen2
+      hyper_v_generation: V2
+    docker:
+      base_image: "registry.suse.com/bci/bci-base:16.0"
+
 sles-15:
   display_name: SUSE Linux Enterprise Server 15 SP7
   vendor: SUSE
   family: linux
   pkg_family: suse
-  status: preview
+  release: previous
   # The system python3 is 3.6, too old for the pinned ansible-core.
   ansible_python: /usr/bin/python3.11
   notes: >-
@@ -152,7 +275,7 @@ sles-15:
     redistributable SLE BCI base image.
   targets:
     aws:
-      source_ami_filter_name: "suse-sles-15-sp7-v*-hvm-ssd-x86_64"
+      source_ami_filter_name: "suse-sles-15-sp7-v????????-hvm-ssd-x86_64" # ? = one character: skips -ecs/-byos variants
       source_ami_owners: ["013907871322"] # SUSE
       ssh_username: ec2-user
     azure:
@@ -164,12 +287,32 @@ sles-15:
       base_image: "registry.suse.com/bci/bci-base:15.7"
 
 # ---- Microsoft ----------------------------------------------------------------------
+windows-2025:
+  display_name: Windows Server 2025 Datacenter
+  vendor: Microsoft
+  family: windows
+  pkg_family: windows
+  release: latest
+  notes: >-
+    Built over WinRM with Ansible and sysprep. Builds take 60-120 minutes
+    because of Windows Update. Self-service VMs from Windows images aren't
+    available yet (Linux only for now).
+  targets:
+    aws:
+      source_ami_filter_name: "Windows_Server-2025-English-Full-Base-*"
+      source_ami_owners: ["801119661308"] # Amazon (Windows AMIs)
+    azure:
+      image_publisher: MicrosoftWindowsServer
+      image_offer: WindowsServer
+      image_sku: 2025-datacenter-azure-edition
+      hyper_v_generation: V2
+
 windows-2022:
   display_name: Windows Server 2022 Datacenter
   vendor: Microsoft
   family: windows
   pkg_family: windows
-  status: preview
+  release: previous
   notes: >-
     Built over WinRM with Ansible and sysprep. Builds take 60-120 minutes
     because of Windows Update. Self-service VMs from Windows images aren't

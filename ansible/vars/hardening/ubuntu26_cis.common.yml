@@ -1,0 +1,23 @@
+---
+# Shared overrides for ansible-lockdown/UBUNTU26-CIS 0.9.0
+# (CIS Ubuntu 26.04 LTS Benchmark v1.0.0). 0.9.0 is the role's first public
+# release; re-check this file and docs/hardening-exceptions.md when it
+# reaches 1.x. Same build-safe overrides as Ubuntu 24.04.
+setup_audit: false
+run_audit: false
+skip_reboot: true
+
+# EXCEPTION 5.2.4 password for privilege escalation: see ubuntu24_cis.common.yml.
+ubtu26cis_rule_5_2_4: false
+
+# Firewall: ufw, default deny out, plus the ports below and the target's.
+factory_ufw_out_ports_common:
+  - { port: 53, proto: tcp }   # DNS
+  - { port: 53, proto: udp }   # DNS
+  - { port: 67, proto: udp }   # DHCP lease renewal
+  - { port: 80, proto: tcp }   # package mirrors, cloud metadata services
+  - { port: 123, proto: udp }  # NTP
+  - { port: 443, proto: tcp }  # HTTPS
+ubtu26cis_ufw_allow_out_ports: "{{ factory_ufw_out_ports_common + (factory_ufw_out_ports_target | default([])) }}"
+
+ubtu26cis_set_boot_pass: false

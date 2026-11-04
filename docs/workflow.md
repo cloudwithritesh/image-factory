@@ -31,7 +31,8 @@ flowchart TD
 | `portal-request.yml` | `issues: opened` (portal issues from owners/members/collaborators); `workflow_dispatch` (Backstage) | `request`: process → re-check → branch/commit/PR → start PR checks (no App) → reply on the issue | none | one group per submission |
 | `pr-standards.yml` | `pull_request` (opened, edited, synchronize, reopened); `workflow_dispatch` (`pr`, started by portal-request) | `pr-standards`: branch, title, commit subjects; validate all requests and VMs | none | per PR, newer cancels older |
 | `image-factory.yml` | push to `main`; PRs; monthly schedule (`23 18 1 * *` UTC = 02:23 SGT on the 1st); `workflow_dispatch` (`image_request`, `rebuild_all`, `debug`) | `lint` → `plan` → `build` (matrix: image × target, Linux or Windows template) → `promote` (matrix, environments) | build/promote on `main` only | PRs: per branch, newer cancels older; `main`/dispatch: one group per run (nothing dropped) |
-| `vm-provision.yml` | push to `main` touching `vms/**`; `workflow_dispatch` (`vm`, `debug`) | `detect` → `apply` (matrix per VM) | yes | per VM |
+| `vm-provision.yml` | push to `main` touching `vms/**`; `workflow_dispatch` (`vm`, `debug`) | `detect` → `apply` (matrix per VM; `terraform/vm/azure` or `terraform/vm/aws` from the request's cloud) | yes | per VM |
+| `base-images.yml` | weekly (Mon 09:41 SGT); `workflow_dispatch` | `check`: every catalog base image still resolves on Azure and AWS | read-only (main) | |
 | `portal-pages.yml` | push to `main` touching catalogs, requests, VMs, portal or scripts; `workflow_dispatch` | `build` (render data) → `deploy` (GitHub Pages) | none | `pages` |
 | `branch-cleanup.yml` | `pull_request: closed` without merge, branch `portal/…` | delete the branch | none | |
 
@@ -146,7 +147,7 @@ sequenceDiagram
   participant RQ as portal-request
   actor RV as Reviewer
   participant VP as vm-provision
-  participant AZ as Azure
+  participant AZ as Azure / AWS
 
   U->>P: "Virtual machine" form (existing names load current settings)
   P->>RQ: issue or dispatch
@@ -154,9 +155,9 @@ sequenceDiagram
   RQ->>RQ: vms/<name>.yaml, branch portal/vm/…, PR feat|chore(vm): …
   RV->>RQ: approve + squash merge
   VP->>VP: detect changed vms/*.yaml (per-VM concurrency)
-  VP->>AZ: OIDC login, terraform init (vms/<name>.tfstate)
-  VP->>AZ: resolve image (must be Status=approved), apply
-  AZ-->>VP: private IP (+ public IP)
+  VP->>AZ: OIDC login (Azure or AWS), terraform init (vms/<name>.tfstate)
+  VP->>AZ: resolve image (Azure gallery / AWS SSM catalog, must be approved), apply
+  AZ-->>VP: private IP (+ public IP), SSM command on AWS
   VP->>VP: job summary: IPs, image version, ssh command
 ```
 

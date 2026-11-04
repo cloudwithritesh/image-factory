@@ -104,7 +104,7 @@ spec:
         admin_username:
           title: Admin user
           type: string
-          default: azureuser
+          default: cloudadmin
         ssh_public_key:
           title: SSH public key
           type: string
