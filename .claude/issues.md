@@ -98,6 +98,13 @@ fix something that took more than a few minutes to understand.
 - **Rule:** check every role default that captures build-time facts
   (`ansible_facts['user_id']`, `SUDO_USER`).
 
+### Packer WinRM defaulted to Basic auth while the AWS listener disabled it
+- **Found by:** automated review on PR #6, before any build.
+- **Fix:** `winrm_use_ntlm = true` on both Windows sources, matching Ansible's
+  `ansible_winrm_transport=ntlm`.
+- **Rule:** the communicator, the listener set-up and Ansible must agree on
+  transport and auth.
+
 ### Windows CIS controls cut off WinRM mid-build
 - **Cause:** 2.2.26/2.2.27 (deny network logon for local accounts),
   18.10.89.x/18.10.90.1 (WinRM auth/remote shell), 2.3.1.3, 9.3.4.

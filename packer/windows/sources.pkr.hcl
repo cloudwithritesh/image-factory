@@ -46,6 +46,7 @@ source "amazon-ebs" "windows" {
   winrm_username = "Administrator"
   winrm_use_ssl  = true
   winrm_insecure = true # self-signed listener certificate on a throwaway VM
+  winrm_use_ntlm = true # Basic auth is turned off in the user data
   winrm_timeout  = var.winrm_timeout
 
   imds_support = "v2.0"
@@ -94,6 +95,7 @@ source "azure-arm" "windows" {
   winrm_username = var.winrm_username
   winrm_use_ssl  = true
   winrm_insecure = true
+  winrm_use_ntlm = true # same auth as Ansible (ansible_winrm_transport=ntlm)
   winrm_timeout  = var.winrm_timeout
 
   # WinRM (5986) on the build VM is reachable from the runner's IP only
