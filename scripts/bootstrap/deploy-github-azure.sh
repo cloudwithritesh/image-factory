@@ -9,8 +9,9 @@
 #   3. creates Azure storage for Terraform state
 #   4. terraform apply terraform/factory/azure (shows the plan, asks first)
 #   5. stores the Terraform outputs as GitHub Actions repository variables
-#   6. creates the promotion environments
-#   7. pushes the code
+#   6. creates the promotion environments and applies the repo standards
+#      (scripts/bootstrap/configure-github-repo.sh)
+#   7. pushes the code (first run), or opens a standard PR for changed files
 #   8. starts the first image build
 #
 # Usage (from the repo root):
@@ -135,6 +136,7 @@ STATE_KEY_VALUE="$(az storage account keys list --account-name "$STATE_SA" \
 az storage container create --name "$STATE_CONTAINER" --account-name "$STATE_SA" \
   --account-key "$STATE_KEY_VALUE" -o none
 unset STATE_KEY_VALUE
+STATE_SA_ID="$(az storage account show --name "$STATE_SA" --resource-group "$STATE_RG" --query id -o tsv)"
 ok "state in ${STATE_SA}/${STATE_CONTAINER} (blob versioning on)"
 
 # -----------------------------------------------------------------------------
@@ -152,13 +154,16 @@ step "4/8  Terraform: Azure foundation"
     -var="location=${AZURE_LOCATION}" \
     -var="github_repository=${REPO}" \
     -var="github_repository_id=${GH_REPO_ID}" \
-    -var="github_owner_id=${GH_OWNER_ID}"
+    -var="github_owner_id=${GH_OWNER_ID}" \
+    -var="tf_state_storage_account_id=${STATE_SA_ID}"
 )
 CI_VARS="$(terraform -chdir=terraform/factory/azure output -json ci_variables)"
 ok "Azure foundation applied"
 
 # -----------------------------------------------------------------------------
 step "5/8  GitHub Actions repository variables"
+CI_VARS="$(jq -c --arg rg "$STATE_RG" --arg sa "$STATE_SA" \
+  '. + {TF_STATE_RESOURCE_GROUP: $rg, TF_STATE_STORAGE_ACCOUNT: $sa}' <<< "$CI_VARS")"
 echo "$CI_VARS" | jq -r 'to_entries[] | "\(.key)\t\(.value)"' |
   while IFS="$(printf '\t')" read -r key value; do
     gh variable set "$key" --repo "$REPO" --body "$value"
@@ -170,7 +175,8 @@ step "6/8  Promotion environments"
 # Free-plan private repos can't use environments. Fall back to promoting
 # without them; the OIDC trust for the main branch still applies.
 use_envs=true
-if [[ "$REPO_VISIBILITY" == "private" && "$GH_PLAN" == "free" ]]; then
+actual_visibility="$(gh api "repos/${REPO}" -q .visibility)"
+if [[ "$actual_visibility" != "public" && "$GH_PLAN" == "free" ]]; then
   use_envs=false
 fi
 if $use_envs; then
@@ -192,6 +198,8 @@ else
   warn "GitHub Free + private repo: no environments, so promotion: manual isn't available."
   warn "Images promote automatically after passing the scan."
 fi
+
+"${ROOT}/scripts/bootstrap/configure-github-repo.sh" "$REPO"
 
 # -----------------------------------------------------------------------------
 step "7/8  Push the code"
@@ -217,16 +225,27 @@ if git rev-parse --verify -q HEAD > /dev/null; then
   git checkout -q -B main
 fi
 git add -A
+author=(-c user.name="${GIT_AUTHOR_NAME:-$GH_LOGIN}"
+        -c user.email="${GIT_AUTHOR_EMAIL:-${GH_USER_ID}+${GH_LOGIN}@users.noreply.github.com}")
 if git diff --cached --quiet; then
   ok "nothing new to commit"
+elif ! git ls-remote --exit-code --heads origin main > /dev/null 2>&1; then
+  # First run: the repo is empty, so main is created directly
+  git "${author[@]}" commit -q -m "feat: image factory initial import"
+  git push -u origin main
+  ok "pushed to ${remote_url}"
 else
-  git -c user.name="${GIT_AUTHOR_NAME:-$GH_LOGIN}" \
-      -c user.email="${GIT_AUTHOR_EMAIL:-${GH_USER_ID}+${GH_LOGIN}@users.noreply.github.com}" \
-      commit -q -m "Image factory phase 1: Packer/Ansible/Terraform, GitHub Actions + GitLab CI"
-  ok "committed"
+  # main is protected: changes go through a standard short-lived branch + PR
+  branch="chore/bootstrap-$(date -u +%Y%m%d-%H%M)"
+  git switch -q -c "$branch"
+  git "${author[@]}" commit -q -m "chore(bootstrap): files updated by the deploy script"
+  git push -q -u origin "$branch"
+  pr_url="$(gh pr create --repo "$REPO" --base main --head "$branch" \
+    --title "chore(bootstrap): files updated by the deploy script" \
+    --body "Files changed while running \`scripts/bootstrap/deploy-github-azure.sh\` (for example the Terraform provider lock file).")"
+  git switch -q main
+  ok "opened ${pr_url}"
 fi
-git push -u origin main
-ok "pushed to ${remote_url}"
 
 # -----------------------------------------------------------------------------
 step "8/8  First image build"
@@ -248,5 +267,5 @@ fi
 echo
 bold "Done."
 echo "    Actions:   https://github.com/${REPO}/actions"
-echo "    Gallery:   az sig image-version list -g rg-image-factory-gallery -r sig_image_factory -i ubuntu-2404 -o table"
+echo "    Gallery:   az sig image-version list -g rg-image-factory-gallery -r sig_image_factory -i ubuntu-2404-base -o table"
 echo "    Packages:  https://github.com/${GITHUB_OWNER}?tab=packages"

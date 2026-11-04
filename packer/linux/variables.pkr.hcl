@@ -175,6 +175,18 @@ variable "azure_gallery_image_definition" {
   default = ""
 }
 
+variable "azure_hyper_v_generation" {
+  type        = string
+  description = "Used by packer-build.sh to create the gallery image definition on first use"
+  default     = "V2"
+}
+
+variable "azure_os_type" {
+  type        = string
+  description = "Used by packer-build.sh to create the gallery image definition on first use"
+  default     = "Linux"
+}
+
 variable "azure_image_publisher" {
   type    = string
   default = ""

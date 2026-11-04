@@ -1,0 +1,44 @@
+# Everything Backstage needs from this repo. Register this one file
+# (app-config.image-factory.yaml does it) and Backstage picks up the rest.
+apiVersion: backstage.io/v1alpha1
+kind: Location
+metadata:
+  name: image-factory
+  description: Image factory templates, teams and components
+spec:
+  targets:
+    - ./org.yaml
+    - ./templates/image-request/template.yaml
+    - ./templates/vm-request/template.yaml
+---
+apiVersion: backstage.io/v1alpha1
+kind: System
+metadata:
+  name: image-factory
+  title: Image Factory
+  description: Golden images for AWS, Azure and Docker, and self-service VMs built from them
+  links:
+    - url: https://cloudwithritesh.github.io/image-factory/
+      title: GitHub Pages portal
+      icon: web
+    - url: https://github.com/cloudwithritesh/image-factory/actions
+      title: Pipelines
+      icon: dashboard
+spec:
+  owner: group:default/platform-engineering
+---
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: image-factory-pipeline
+  title: Image factory pipeline
+  description: Packer + Ansible + Terraform pipeline with CIS hardening, SBOM and vulnerability gate
+  annotations:
+    github.com/project-slug: cloudwithritesh/image-factory
+    backstage.io/source-location: url:https://github.com/cloudwithritesh/image-factory/tree/main/
+  tags: [packer, terraform, ansible, sbom]
+spec:
+  type: service
+  lifecycle: production
+  owner: group:default/platform-engineering
+  system: image-factory

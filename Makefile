@@ -3,7 +3,7 @@ REQUEST ?= requests/ubuntu-2404-base.yaml
 NAME    := $(basename $(notdir $(REQUEST)))
 TARGET  ?= docker
 
-.PHONY: help validate render packer-validate build lint fmt clean
+.PHONY: help validate render packer-validate build lint fmt clean portal portal-test
 
 help:
 	@echo "make validate                          validate every request"
@@ -12,6 +12,8 @@ help:
 	@echo "make build REQUEST=... TARGET=docker   local build (docker needs only a Docker daemon)"
 	@echo "make lint                              all linters"
 	@echo "make fmt                               format Packer and Terraform code"
+	@echo "make portal                            regenerate Backstage templates + preview the Pages portal on :8000"
+	@echo "make portal-test                       portal processor and naming-standard tests"
 
 validate:
 	python3 scripts/imagefactory.py validate
@@ -42,3 +44,12 @@ fmt:
 
 clean:
 	rm -rf build .packer-tmp
+
+portal:
+	python3 scripts/portal/render.py backstage
+	python3 scripts/portal/render.py pages --out portal/pages
+	cd portal/pages && python3 -m http.server 8000
+
+portal-test:
+	python3 scripts/portal/test_portal.py
+	python3 scripts/portal/validate_all.py

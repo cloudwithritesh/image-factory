@@ -1,0 +1,27 @@
+# Portal branches are short-lived. Merged PRs delete their branch through
+# the repo setting "Automatically delete head branches"; this covers PRs
+# closed without merging.
+name: branch-cleanup
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  delete-branch:
+    if: >-
+      !github.event.pull_request.merged &&
+      startsWith(github.event.pull_request.head.ref, 'portal/') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete the portal branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${BRANCH}" \
+            && echo "deleted ${BRANCH}" || echo "${BRANCH} already gone"

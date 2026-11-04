@@ -1,0 +1,34 @@
+# Teams and users for the portal. With GitHub sign-in, Backstage matches the
+# GitHub username to a User entity with the same name, so add a User here for
+# everyone who signs in (or import them later with the GitHub org provider;
+# with Entra ID, use the Microsoft Graph org provider instead).
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: platform-engineering
+  title: Platform Engineering
+  description: Owns the image factory, reviews image requests
+spec:
+  type: team
+  children: []
+---
+apiVersion: backstage.io/v1alpha1
+kind: Group
+metadata:
+  name: web-team
+  title: Web Team
+  description: Example consumer team that requests VMs
+spec:
+  type: team
+  children: []
+---
+apiVersion: backstage.io/v1alpha1
+kind: User
+metadata:
+  name: cloudwithritesh
+  annotations:
+    github.com/user-login: cloudwithritesh
+spec:
+  profile:
+    displayName: Ritesh
+  memberOf: [platform-engineering]

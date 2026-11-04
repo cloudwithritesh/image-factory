@@ -1,0 +1,60 @@
+# Publishes the self-service portal (portal/pages) to GitHub Pages, with its
+# data generated from the catalogs, requests/ and vms/ in main. Any change to
+# what can be requested updates the forms automatically.
+name: portal-pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "catalog/**"
+      - "requests/**"
+      - "vms/**"
+      - "portal/pages/**"
+      - "scripts/portal/**"
+      - "scripts/imagefactory.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install pyyaml==6.0.3 jsonschema==4.26.0
+
+      - name: Build site
+        run: |
+          mkdir -p _site
+          cp -r portal/pages/. _site/
+          python3 scripts/portal/render.py pages --out _site
+          touch _site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

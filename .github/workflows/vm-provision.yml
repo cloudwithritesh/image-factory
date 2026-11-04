@@ -1,0 +1,160 @@
+# =============================================================================
+# VM provisioning: applies vms/<name>.yaml after its PR is merged.
+#   state: present  -> terraform apply  (create or update)
+#   state: absent   -> terraform destroy (decommission; the file stays as a record)
+# One Terraform state per VM: vms/<name>.tfstate in the factory state account.
+# The PR approval is the gate, so this runs straight away on merge.
+# =============================================================================
+name: vm-provision
+
+on:
+  push:
+    branches: [main]
+    paths: ["vms/**"]
+  workflow_dispatch:
+    inputs:
+      vm:
+        description: "VM name to (re)apply, e.g. web-01"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vm-provision
+  cancel-in-progress: false
+
+env:
+  TF_VAR_subscription_id: ${{ vars.PKR_VAR_azure_subscription_id }}
+  TF_VAR_resource_group_name: ${{ vars.VM_RESOURCE_GROUP }}
+  TF_VAR_subnet_id: ${{ vars.VM_SUBNET_ID }}
+  TF_VAR_gallery_resource_group: ${{ vars.PKR_VAR_azure_gallery_resource_group }}
+  TF_VAR_gallery_name: ${{ vars.PKR_VAR_azure_gallery_name }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      vms: ${{ steps.find.outputs.vms }}
+      count: ${{ steps.find.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed VM requests
+        id: find
+        env:
+          INPUT_VM: ${{ inputs.vm }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [[ -n "$INPUT_VM" ]]; then
+            names="$INPUT_VM"
+          else
+            if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]]; then BEFORE="${GITHUB_SHA}~1"; fi
+            names="$(git diff --name-only --diff-filter=AM "$BEFORE" "$GITHUB_SHA" -- 'vms/*.yaml' \
+              | xargs -r -n1 basename | sed 's/\.yaml$//')"
+            deleted="$(git diff --name-only --diff-filter=D "$BEFORE" "$GITHUB_SHA" -- 'vms/*.yaml' || true)"
+            if [[ -n "$deleted" ]]; then
+              echo "::warning::Deleting a VM file doesn't remove the VM. Set 'state: absent' (portal: Decommission) instead: ${deleted}"
+            fi
+          fi
+          json="$(printf '%s\n' "$names" | sed '/^$/d' | jq -R . | jq -sc .)"
+          echo "vms=${json}" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq length <<< "$json")" >> "$GITHUB_OUTPUT"
+          echo "VMs to apply: ${json}"
+
+  apply:
+    name: ${{ matrix.vm }}
+    needs: detect
+    if: needs.detect.outputs.count != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        vm: ${{ fromJSON(needs.detect.outputs.vms) }}
+    defaults:
+      run:
+        working-directory: terraform/vm/azure
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install validator dependencies
+        run: pip install pyyaml==6.0.3 jsonschema==4.26.0
+
+      - name: Render Terraform variables
+        id: request
+        env:
+          VM: ${{ matrix.vm }}
+        run: |
+          python3 "${GITHUB_WORKSPACE}/scripts/portal/vm_tfvars.py" "${GITHUB_WORKSPACE}/vms/${VM}.yaml" \
+            --out request.auto.tfvars.json | tee -a "$GITHUB_OUTPUT"
+
+      - name: Only Azure is wired up so far
+        if: steps.request.outputs.cloud != 'azure'
+        run: |
+          echo "::error::cloud '${{ steps.request.outputs.cloud }}' has no provisioning module yet"
+          exit 1
+
+      - name: Read Terraform version
+        id: tf
+        run: grep '^TERRAFORM_VERSION=' "${GITHUB_WORKSPACE}/ci/versions.env" | cut -d= -f2 | sed 's/^/version=/' >> "$GITHUB_OUTPUT"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.tf.outputs.version }}
+          terraform_wrapper: false
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.PKR_VAR_azure_subscription_id }}
+
+      - name: Terraform init
+        env:
+          VM: ${{ matrix.vm }}
+          STATE_RG: ${{ vars.TF_STATE_RESOURCE_GROUP }}
+          STATE_SA: ${{ vars.TF_STATE_STORAGE_ACCOUNT }}
+        run: |
+          terraform init -input=false \
+            -backend-config="resource_group_name=${STATE_RG}" \
+            -backend-config="storage_account_name=${STATE_SA}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=vms/${VM}.tfstate" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform apply
+        if: steps.request.outputs.state == 'present'
+        run: terraform apply -input=false -auto-approve
+
+      - name: Terraform destroy (decommission)
+        if: steps.request.outputs.state == 'absent'
+        run: terraform destroy -input=false -auto-approve
+
+      - name: Summary
+        if: always()
+        env:
+          VM: ${{ matrix.vm }}
+          STATE: ${{ steps.request.outputs.state }}
+        run: |
+          {
+            echo "### VM \`${VM}\` (${STATE})"
+            if [[ "$STATE" == "present" ]] && terraform output -json > /dev/null 2>&1; then
+              echo
+              echo "| Output | Value |"
+              echo "|---|---|"
+              terraform output -json | jq -r 'to_entries[] | "| \(.key) | `\(.value.value)` |"'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

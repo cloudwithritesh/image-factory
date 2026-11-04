@@ -101,14 +101,21 @@ lint:yaml:
 lint:shell:
   stage: validate
   script:
-    - shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/container/*.sh scripts/bootstrap/*.sh
+    - shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/container/*.sh scripts/bootstrap/*.sh scripts/portal/*.sh
+
+lint:portal:
+  stage: validate
+  script:
+    - python3 scripts/portal/test_portal.py
+    - python3 scripts/portal/validate_all.py
+    - python3 scripts/portal/render.py backstage --check
 
 lint:terraform:
   stage: validate
   script:
     - terraform fmt -check -diff -recursive terraform/
     - |
-      for dir in terraform/factory/aws terraform/factory/azure; do
+      for dir in terraform/factory/aws terraform/factory/azure terraform/vm/azure; do
         terraform -chdir="$dir" init -backend=false -input=false
         terraform -chdir="$dir" validate
       done

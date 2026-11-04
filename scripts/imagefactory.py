@@ -299,7 +299,10 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
             "azure_image_publisher": t["image_publisher"],
             "azure_image_offer": t["image_offer"],
             "azure_image_sku": t["image_sku"],
-            "azure_gallery_image_definition": t["gallery_image_definition"],
+            # One gallery image definition per image request (see packer-build.sh)
+            "azure_gallery_image_definition": name,
+            "azure_hyper_v_generation": t.get("hyper_v_generation", "V2"),
+            "azure_os_type": "Windows" if os_entry["family"] == "windows" else "Linux",
             "azure_vm_size": azure["vm_size"],
             "azure_replication_regions": azure["replication_regions"],
         }
@@ -324,6 +327,8 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
         "promotion": merged(spec, "promotion"),
         "docker_repository": pkrvars.get("docker_repository", ""),
         "azure_gallery_image_definition": pkrvars.get("azure_gallery_image_definition", ""),
+        "azure_hyper_v_generation": pkrvars.get("azure_hyper_v_generation", ""),
+        "azure_os_type": pkrvars.get("azure_os_type", ""),
     }
     (out / "plan.json").write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     return plan

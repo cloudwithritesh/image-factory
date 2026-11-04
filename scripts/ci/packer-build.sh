@@ -17,6 +17,7 @@ case "$TARGET" in
     ;;
   azure)
     azure_login
+    ensure_gallery_image_definition "$VARS_FILE"
     # Only this runner may SSH to the temporary build VM.
     runner_ip="$(curl -fsS https://checkip.amazonaws.com | tr -d '[:space:]')"
     export PKR_VAR_azure_allowed_inbound_ip_addresses="[\"${runner_ip}\"]"
