@@ -1,0 +1,25 @@
+# Managed through the image factory portal.
+# Last change: requested by @cloudwithritesh via GitHub Pages portal (issue #4) on 2026-11-04.
+apiVersion: imagefactory/v1
+kind: ImageRequest
+metadata:
+  name: ubuntu-rh-hardened
+  owner: platform-engineering
+  description: Hardened Ubuntu 24.04 base image for general workloads
+  requested_by: cloudwithritesh
+spec:
+  os: ubuntu-2404
+  targets:
+    - azure
+  hardening:
+    vm: cis-l1
+  software:
+    - curl
+    - jq
+    - unzip
+    - ca-certificates
+    - monitoring-basics
+    - node-exporter
+  scan:
+    fail_on_severity: critical
+  promotion: manual
