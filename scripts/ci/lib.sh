@@ -118,3 +118,30 @@ upload_package_file() {
       ;;
   esac
 }
+
+# One gallery image definition per image request, created on first build.
+# Identifier: publisher ImageFactory / offer <os key> / sku <image name>.
+ensure_gallery_image_definition() {
+  local vars_file="$1" definition os_key os_type generation
+  require_env PKR_VAR_azure_gallery_resource_group PKR_VAR_azure_gallery_name
+  definition="$(jq -r '.azure_gallery_image_definition' "$vars_file")"
+  os_key="$(jq -r '.os_key' "$vars_file")"
+  os_type="$(jq -r '.azure_os_type // "Linux"' "$vars_file")"
+  generation="$(jq -r '.azure_hyper_v_generation // "V2"' "$vars_file")"
+  if az sig image-definition show \
+       --resource-group "$PKR_VAR_azure_gallery_resource_group" \
+       --gallery-name "$PKR_VAR_azure_gallery_name" \
+       --gallery-image-definition "$definition" > /dev/null 2>&1; then
+    log "Gallery image definition ${definition} exists"
+    return
+  fi
+  log "Creating gallery image definition ${definition} (${os_type}, ${generation})"
+  az sig image-definition create \
+    --resource-group "$PKR_VAR_azure_gallery_resource_group" \
+    --gallery-name "$PKR_VAR_azure_gallery_name" \
+    --gallery-image-definition "$definition" \
+    --publisher ImageFactory --offer "$os_key" --sku "$definition" \
+    --os-type "$os_type" --os-state Generalized --hyper-v-generation "$generation" \
+    --description "Golden image ${definition} (image factory)" \
+    --tags ManagedBy=image-factory OsKey="$os_key" --output none
+}
