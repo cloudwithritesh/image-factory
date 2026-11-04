@@ -14,7 +14,15 @@ request YAML ─► validate ─► Packer build (AWS │ Azure │ Docker) ─�
      └── self-service portal (Backstage, phase 3) opens a PR with the request
 ```
 
-Status: **phase 1**, Ubuntu 24.04 on all three targets.
+Status: **phases 1 and 3–4**: Ubuntu 24.04 golden images (Azure + Docker live, AWS ready), plus a
+self-service portal (GitHub Pages + local Backstage) where DevOps request images and end users
+request VMs. Every request becomes a reviewed pull request ([portal/README.md](portal/README.md)).
+
+| Portal | Where |
+|---|---|
+| GitHub Pages | https://cloudwithritesh.github.io/image-factory/ |
+| Backstage (local) | http://localhost:3000/create after [setup](portal/README.md#backstage-local) |
+| Standards | [docs/standards.md](docs/standards.md): branches, commits, PRs |
 
 ## How it works
 
@@ -32,7 +40,8 @@ Status: **phase 1**, Ubuntu 24.04 on all three targets.
    all get the same Ansible provisioning: patch, install software, apply the
    CIS profile, write `/etc/image-factory/build-info.json`.
    - AWS: an encrypted AMI (customer-managed KMS key), tagged `Status=candidate`.
-   - Azure: a Compute Gallery version with `excludeFromLatest=true`.
+   - Azure: a Compute Gallery version with `excludeFromLatest=true`, in an image
+     definition named after the request (created on first build).
    - Docker: pushed as `:candidate-<version>` (GHCR on GitHub, the GitLab registry on GitLab).
 5. **SBOM**: on VMs, Syft runs on the build VM after hardening (CycloneDX
    and SPDX JSON) and Packer downloads the files. For Docker, Syft scans the
@@ -57,9 +66,11 @@ every target in one run.
 ## Repository layout
 
 ```
-catalog/              os.yaml, hardening.yaml, software.yaml (what can be requested)
-schemas/              JSON schema for image requests
+catalog/              os.yaml, hardening.yaml, software.yaml, vm.yaml (what can be requested)
+schemas/              JSON schemas for image and VM requests
 requests/             one YAML per image (written by the portal or by hand)
+vms/                  one YAML per end-user VM (written by the portal)
+portal/               GitHub Pages portal, Backstage templates + setup
 packer/linux/         one build, sources: amazon-ebs, azure-arm, docker
 ansible/              image.yml playbook, roles (base, software), hardening vars
 scripts/              imagefactory.py (validate/render/plan), CI scripts, VM/container scripts
@@ -67,7 +78,8 @@ scripts/              imagefactory.py (validate/render/plan), CI scripts, VM/con
 .github/actions/      setup-tools: pinned, checksum-verified Packer, Syft, Grype, crane
 .gitlab-ci.yml        GitLab pipeline (for later), plus .gitlab/ci/ job templates
 ci/                   versions.env (tool pins), GitLab toolbox Dockerfile, Python requirements
-terraform/factory/    one-time AWS and Azure foundations (OIDC trust, network, gallery, KMS)
+terraform/factory/    one-time AWS and Azure foundations (OIDC trust, network, gallery, KMS, VM landing zone)
+terraform/vm/azure/   one end-user VM from the latest promoted image (used by vm-provision)
 docs/                 hardening exceptions
 ```
 
@@ -156,7 +168,8 @@ package settings.
 
 | I want to… | Do this |
 |---|---|
-| Add a new image | Add `requests/<name>.yaml` and open a PR. The PR run validates it; merging builds it. |
+| Add or change an image | Portal → **Golden image** (or add `requests/<name>.yaml` on a `feat/…` branch). Merging the PR builds it. |
+| Get a VM | Portal → **Virtual machine**. Merging the PR runs `vm-provision`; the run summary shows the IP. |
 | Rebuild one image | Actions → image-factory → Run workflow, with `image_request=requests/<name>.yaml`. The portal makes the same call through the `workflow_dispatch` API. |
 | Rebuild everything | The monthly schedule does this, or run the workflow with `rebuild_all`. |
 | Add approved software | Add an entry to `catalog/software.yaml` (`apt`, `url` with a checksum, or `file`). |
@@ -232,5 +245,6 @@ in one place.
 
 1. ✅ Factory core: Ubuntu 24.04 on AWS, Azure and Docker; CIS L1/L2; SBOM; Grype gate; promotion; GitHub and GitLab pipelines
 2. More operating systems: RHEL 9 / Rocky 9, Amazon Linux 2023, Windows Server 2022 (WinRM, sysprep, CIS GPO role)
-3. Backstage image-request template: a form that writes the request and opens a PR
-4. Backstage VM/EC2 template: Terraform consumer modules that use the catalog's latest approved image
+3. ✅ Self-service portal: GitHub Pages + Backstage forms → standard PRs (image requests)
+4. ✅ VM self-service on Azure (Terraform per VM, latest promoted image); AWS EC2 module next
+5. Entra ID sign-in for Backstage, and hosting it (Azure Container Apps)
