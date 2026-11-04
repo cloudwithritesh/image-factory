@@ -1,0 +1,51 @@
+# Overlay for a local Backstage app. setup.sh copies it into your app as
+# app-config.local.yaml, which Backstage loads automatically and git ignores.
+#
+# Environment variables (setup.sh prints the exports):
+#   GITHUB_TOKEN                token for GitHub API calls: reading templates, dispatching
+#                               the portal-request workflow (needs repo + workflow scopes;
+#                               `gh auth token` works locally)
+#   AUTH_GITHUB_CLIENT_ID       GitHub OAuth App for sign-in
+#   AUTH_GITHUB_CLIENT_SECRET
+app:
+  title: Image Factory Portal
+
+organization:
+  name: Image Factory
+
+integrations:
+  github:
+    - host: github.com
+      token: ${GITHUB_TOKEN}
+
+auth:
+  environment: development
+  providers:
+    # Guest stays enabled for a first run without the OAuth App
+    guest: {}
+    github:
+      development:
+        clientId: ${AUTH_GITHUB_CLIENT_ID}
+        clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+        signIn:
+          resolvers:
+            # GitHub username must match a User entity (portal/backstage/org.yaml)
+            - resolver: usernameMatchingUserEntityName
+    # Later, Entra ID instead of GitHub:
+    # microsoft:
+    #   development:
+    #     clientId: ${AUTH_MICROSOFT_CLIENT_ID}
+    #     clientSecret: ${AUTH_MICROSOFT_CLIENT_SECRET}
+    #     tenantId: ${AUTH_MICROSOFT_TENANT_ID}
+    #     signIn:
+    #       resolvers:
+    #         - resolver: emailMatchingUserEntityProfileEmail
+
+catalog:
+  rules:
+    - allow: [Component, System, API, Resource, Location, Template, User, Group]
+  locations:
+    - type: url
+      target: https://github.com/cloudwithritesh/image-factory/blob/main/portal/backstage/catalog-info.yaml
+      rules:
+        - allow: [Location, Template, User, Group, System, Component]

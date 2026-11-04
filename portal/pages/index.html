@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Image Factory portal</title>
+<meta name="description" content="Self-service portal: request golden images and VMs. Every request becomes a reviewed pull request.">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #59636e; --line: #d8dee4;
+    --accent: #3b5bdb; --accent-soft: #e7ecff; --ok: #1a7f37; --warn: #9a6700; --err: #cf222e;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d1117; --card: #161b22; --text: #e6edf3; --muted: #9198a1; --line: #30363d;
+            --accent: #7c9cff; --accent-soft: #1c2541; --ok: #3fb950; --warn: #d29922; --err: #f85149; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--card); border-bottom: 1px solid var(--line); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 0 6px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: baseline; gap: 12px; }
+  .brand h1 { font-size: 20px; margin: 0; font-weight: 600; }
+  .brand span { color: var(--muted); font-size: 13px; }
+  .top a { color: var(--accent); text-decoration: none; font-size: 14px; }
+  nav { display: flex; gap: 4px; }
+  nav button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; font: inherit; color: var(--muted); cursor: pointer; }
+  nav button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  main.wrap { padding-top: 24px; padding-bottom: 32px; }
+  .grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+  .card h2 { font-size: 16px; margin: 0 0 4px; }
+  .card p.lead { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  fieldset { border: 0; padding: 0; margin: 0 0 18px; }
+  legend { font-weight: 600; font-size: 13px; text-transform: none; color: var(--muted); margin-bottom: 8px; letter-spacing: .02em; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; } }
+  label.f { display: block; margin-bottom: 12px; font-size: 14px; }
+  label.f > span { display: block; margin-bottom: 4px; font-weight: 500; }
+  input[type=text], input[type=number], select, textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+    color: var(--text); font: inherit; }
+  textarea { font-family: var(--mono); font-size: 12.5px; min-height: 70px; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+  .err { color: var(--err); font-size: 12.5px; margin-top: 3px; min-height: 0; }
+  .checks { display: grid; gap: 6px; }
+  .check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+  .check:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .check input { margin-top: 3px; }
+  .check small { display: block; color: var(--muted); }
+  .check.disabled { opacity: .45; cursor: not-allowed; }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { display: inline-flex; gap: 6px; align-items: center; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; font-size: 14px; }
+  .pill:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); margin-left: 4px; }
+  pre { margin: 0; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: 12px/1.5 var(--mono); overflow: auto; max-height: 340px; white-space: pre-wrap; word-break: break-word; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; font-size: 13px; margin: 10px 0 14px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  .actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  button.primary { background: var(--accent); color: #fff; border: 0; padding: 10px 18px; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary:disabled { opacity: .5; cursor: not-allowed; }
+  .note { font-size: 13px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); margin-top: 14px; }
+  .note.ok { border-color: var(--ok); } .note.warn { border-color: var(--warn); }
+  ol.flow { margin: 8px 0 0; padding-left: 20px; font-size: 13.5px; color: var(--muted); }
+  ol.flow li { margin-bottom: 4px; }
+  .sticky { position: sticky; top: 16px; }
+  [hidden] { display: none !important; }
+  .links a { display: block; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; color: var(--text); text-decoration: none; }
+  .links a:hover { border-color: var(--accent); }
+  .links a small { display: block; color: var(--muted); }
+  footer.wrap { color: var(--muted); font-size: 12.5px; padding-bottom: 32px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand"><h1>Image Factory</h1><span>Self-service portal</span></div>
+      <a id="repo-link" href="#" target="_blank" rel="noopener">Repository ↗</a>
+    </div>
+    <nav role="tablist" aria-label="Portal sections">
+      <button role="tab" aria-selected="true" data-tab="image">Golden image <small>(DevOps)</small></button>
+      <button role="tab" aria-selected="false" data-tab="vm">Virtual machine</button>
+      <button role="tab" aria-selected="false" data-tab="track">Track requests</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <p id="load-error" class="note warn" hidden></p>
+
+  <!-- ===================== Golden image ===================== -->
+  <section id="tab-image" class="grid">
+    <form class="card" id="image-form" novalidate>
+      <h2>Request or change a golden image</h2>
+      <p class="lead">Built for AWS, Azure and Docker from one definition, hardened to CIS, with an SBOM and a vulnerability gate.</p>
+
+      <fieldset>
+        <legend>Image</legend>
+        <label class="f"><span>Start from</span>
+          <select id="img-existing"><option value="">New image</option></select>
+          <div class="hint">Pick an existing image to change it; the form loads its current settings.</div>
+        </label>
+        <div class="row">
+          <label class="f"><span>Image name</span><input type="text" id="img-name" placeholder="ubuntu-2404-web" autocomplete="off">
+            <div class="err" id="img-name-err"></div></label>
+          <label class="f"><span>Owning team</span><input type="text" id="img-owner" placeholder="platform-engineering">
+            <div class="err" id="img-owner-err"></div></label>
+        </div>
+        <label class="f"><span>Description</span><input type="text" id="img-desc" maxlength="250" placeholder="What this image is for"></label>
+        <div class="row">
+          <label class="f"><span>Operating system</span><select id="img-os"></select></label>
+          <div class="f"><span style="display:block;margin-bottom:4px;font-weight:500">Targets</span>
+            <div class="pills" id="img-targets"></div><div class="err" id="img-targets-err"></div></div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Hardening</legend>
+        <div class="row">
+          <label class="f" id="img-hvm-wrap"><span>VM profile (AWS / Azure)</span><select id="img-hvm"></select><div class="hint" id="img-hvm-hint"></div></label>
+          <label class="f" id="img-hct-wrap"><span>Container profile (Docker)</span><select id="img-hct"></select><div class="hint" id="img-hct-hint"></div></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Approved software</legend>
+        <div class="checks" id="img-software"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Release</legend>
+        <div class="row">
+          <div class="f"><span style="display:block;margin-bottom:4px;font-weight:500">Promotion</span>
+            <div class="pills">
+              <label class="pill"><input type="radio" name="img-promo" value="auto" checked> Automatic</label>
+              <label class="pill"><input type="radio" name="img-promo" value="manual"> Manual approval</label>
+            </div>
+            <div class="hint">Automatic promotes once the vulnerability scan passes.</div></div>
+          <label class="f"><span>Block vulnerabilities at or above</span><select id="img-sev"></select></label>
+        </div>
+      </fieldset>
+    </form>
+
+    <aside class="card sticky">
+      <h2>Your request</h2>
+      <dl class="kv" id="img-kv"></dl>
+      <pre id="img-preview"></pre>
+      <div class="actions"><button class="primary" id="img-submit" type="button">Submit request</button>
+        <span class="hint">Opens GitHub signed in as you</span></div>
+      <div id="img-note"></div>
+      <ol class="flow">
+        <li>GitHub opens with your request. Click <b>Submit new issue</b>.</li>
+        <li>A bot validates it and opens a pull request on a short-lived branch.</li>
+        <li>The platform team reviews and merges, and the image is built, scanned and promoted.</li>
+      </ol>
+    </aside>
+  </section>
+
+  <!-- ===================== Virtual machine ===================== -->
+  <section id="tab-vm" class="grid" hidden>
+    <form class="card" id="vm-form" novalidate>
+      <h2>Create, change or decommission a VM</h2>
+      <p class="lead">VMs are built only from approved, scanned golden images.</p>
+
+      <fieldset>
+        <legend>Action</legend>
+        <div class="pills">
+          <label class="pill"><input type="radio" name="vm-state" value="present" checked> Create or update</label>
+          <label class="pill"><input type="radio" name="vm-state" value="absent"> Decommission</label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>VM</legend>
+        <div class="row">
+          <label class="f"><span>VM name</span><input type="text" id="vm-name" list="vm-names" placeholder="web-01" autocomplete="off">
+            <datalist id="vm-names"></datalist><div class="err" id="vm-name-err"></div></label>
+          <label class="f"><span>Owning team</span><input type="text" id="vm-owner" placeholder="web-team"><div class="err" id="vm-owner-err"></div></label>
+        </div>
+        <div class="row vm-create">
+          <label class="f"><span>Environment</span><select id="vm-env"></select></label>
+          <label class="f"><span>Purpose</span><input type="text" id="vm-desc" maxlength="250" placeholder="Why you need it"></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="vm-create">
+        <legend>Image and size</legend>
+        <div class="row">
+          <label class="f"><span>Cloud</span><select id="vm-cloud"></select></label>
+          <label class="f"><span>Golden image</span><select id="vm-image"></select><div class="err" id="vm-image-err"></div></label>
+        </div>
+        <div class="row">
+          <label class="f"><span>Size</span><select id="vm-size"></select></label>
+          <label class="f"><span>Region</span><select id="vm-region"></select></label>
+        </div>
+        <div class="row">
+          <label class="f"><span>Image version</span><input type="text" id="vm-version" value="latest"><div class="hint">latest = newest promoted version</div><div class="err" id="vm-version-err"></div></label>
+          <label class="f"><span>OS disk (GB)</span><input type="number" id="vm-disk"><div class="err" id="vm-disk-err"></div></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="vm-create">
+        <legend>Access</legend>
+        <div class="row">
+          <label class="f"><span>Admin user</span><input type="text" id="vm-admin"><div class="err" id="vm-admin-err"></div></label>
+          <div class="f"><span style="display:block;margin-bottom:4px;font-weight:500">Public IP</span>
+            <label class="pill"><input type="checkbox" id="vm-pip"> Give this VM a public IP</label></div>
+        </div>
+        <label class="f" id="vm-cidr-wrap" hidden><span>Allowed SSH range</span><input type="text" id="vm-cidr" placeholder="203.0.113.0/24">
+          <div class="hint">Your office or VPN range; /16 or narrower.</div><div class="err" id="vm-cidr-err"></div></label>
+        <label class="f"><span>SSH public key</span><textarea id="vm-key" placeholder="ssh-ed25519 AAAA… you@laptop"></textarea>
+          <div class="hint">The whole line from <code>~/.ssh/id_ed25519.pub</code>. Never paste a private key.</div><div class="err" id="vm-key-err"></div></label>
+      </fieldset>
+    </form>
+
+    <aside class="card sticky">
+      <h2>Your request</h2>
+      <dl class="kv" id="vm-kv"></dl>
+      <pre id="vm-preview"></pre>
+      <div class="actions"><button class="primary" id="vm-submit" type="button">Submit request</button>
+        <span class="hint">Opens GitHub signed in as you</span></div>
+      <div id="vm-note"></div>
+      <ol class="flow">
+        <li>GitHub opens with your request. Click <b>Submit new issue</b>.</li>
+        <li>A bot validates it and opens a pull request.</li>
+        <li>After approval and merge, Terraform creates (or removes) the VM. The run summary shows its IP.</li>
+      </ol>
+    </aside>
+  </section>
+
+  <!-- ===================== Track ===================== -->
+  <section id="tab-track" hidden>
+    <div class="grid">
+      <div class="card links" id="track-links"><h2>Track requests</h2><p class="lead">Everything lives in GitHub, so nothing gets lost.</p></div>
+      <div class="card">
+        <h2>Naming standards</h2>
+        <p class="lead">Every request becomes one short-lived branch and one pull request.</p>
+        <dl class="kv">
+          <dt>Branch</dt><dd>portal/&lt;image|vm&gt;/&lt;name&gt;-&lt;YYYYMMDD&gt;-i&lt;issue&gt;</dd>
+          <dt>Commit / PR</dt><dd>feat(image): add image &lt;name&gt;</dd>
+          <dt></dt><dd>chore(image): update image &lt;name&gt;</dd>
+          <dt></dt><dd>feat(vm): create vm &lt;name&gt; on &lt;cloud&gt;</dd>
+          <dt></dt><dd>chore(vm): decommission vm &lt;name&gt;</dd>
+          <dt>Trailers</dt><dd>Requested-by, Request-source, Request-ref</dd>
+          <dt>Merge</dt><dd>squash, 1 approval, branch auto-deleted</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+</main>
+<footer class="wrap" id="footer"></footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const MARKER = "<!-- portal-request:v1 -->";
+const RX = {
+  image: /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/,
+  vm: /^[a-z][a-z0-9-]{1,13}[a-z0-9]$/,
+  key: /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/=]{40,}( [^\n]{0,100})?$/,
+  cidr: /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d|[12]\d|3[0-2])$/,
+  user: /^[a-z_][a-z0-9_-]{2,31}$/,
+  version: /^(latest|\d+\.\d+\.\d+)$/,
+};
+let D = null;
+
+function opt(sel, items, current) {
+  sel.innerHTML = "";
+  for (const [value, label] of items) {
+    const o = document.createElement("option");
+    o.value = value; o.textContent = label;
+    if (value === current) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+function setErr(id, msg) { const el = $(id); if (el) el.textContent = msg || ""; return !msg; }
+function today() { return new Date().toISOString().slice(0, 10).replace(/-/g, ""); }
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+function kv(el, rows) { el.innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join(""); }
+
+// ------------------------------------------------------------- tabs
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", x === b));
+  for (const t of ["image", "vm", "track"]) $("tab-" + t).hidden = t !== b.dataset.tab;
+  history.replaceState(null, "", "#" + b.dataset.tab);
+}));
+
+// ------------------------------------------------------------- image form
+function imgState() {
+  const targets = [...document.querySelectorAll("#img-targets input:checked")].map((i) => i.value);
+  return {
+    kind: "image",
+    name: $("img-name").value.trim(),
+    owner: $("img-owner").value.trim(),
+    description: $("img-desc").value.trim(),
+    os: $("img-os").value,
+    targets,
+    hardening_vm: targets.some((t) => t !== "docker") ? $("img-hvm").value : "",
+    hardening_container: targets.includes("docker") ? $("img-hct").value : "",
+    software: [...document.querySelectorAll("#img-software input:checked")].map((i) => i.value),
+    promotion: document.querySelector("input[name=img-promo]:checked").value,
+    fail_on_severity: $("img-sev").value,
+  };
+}
+
+function renderImageOptions(keepSelection) {
+  const os = $("img-os").value;
+  const osCfg = D.os[os] || { targets: [] };
+  const prev = new Set(keepSelection ? imgState().targets : osCfg.targets);
+  const enabled = D.enabled_targets || ["aws", "azure", "docker"];
+  $("img-targets").innerHTML = ["aws", "azure", "docker"].map((t) => {
+    const ok = osCfg.targets.includes(t) && enabled.includes(t);
+    const why = !enabled.includes(t) ? " <small>(not set up)</small>" : "";
+    return `<label class="pill" ${ok ? "" : 'style="opacity:.45" title="Not available for this OS or not set up yet"'}><input type="checkbox" value="${t}" ${ok ? "" : "disabled"} ${ok && prev.has(t) ? "checked" : ""}> ${t}${why}</label>`;
+  }).join("");
+  const hard = D.hardening[os] || {};
+  for (const [kind, sel, hint] of [["vm", "img-hvm", "img-hvm-hint"], ["container", "img-hct", "img-hct-hint"]]) {
+    const cfg = hard[kind] || { profiles: {}, default: "" };
+    const cur = $(sel).value || cfg.default;
+    opt($(sel), Object.keys(cfg.profiles).map((p) => [p, p + (p === cfg.default ? " (default)" : "")]), cur in cfg.profiles ? cur : cfg.default);
+    const showHint = () => { $(hint).textContent = (cfg.profiles[$(sel).value] || {}).description || ""; };
+    $(sel).onchange = () => { showHint(); updateImage(); };
+    showHint();
+  }
+  renderSoftware();
+}
+
+function renderSoftware(selected) {
+  const os = $("img-os").value;
+  const targets = imgState().targets;
+  const chosen = new Set(selected || [...document.querySelectorAll("#img-software input:checked")].map((i) => i.value));
+  $("img-software").innerHTML = Object.entries(D.software).filter(([, s]) => s.os.includes(os)).map(([k, s]) => {
+    const fits = s.targets.some((t) => targets.includes(t));
+    const tags = s.targets.map((t) => `<span class="tag">${t}</span>`).join("");
+    return `<label class="check ${fits ? "" : "disabled"}"><input type="checkbox" value="${k}" ${fits ? "" : "disabled"} ${fits && chosen.has(k) ? "checked" : ""}>
+      <span><b>${esc(k)}</b>${tags}<small>${esc(s.description)}</small></span></label>`;
+  }).join("") || '<div class="hint">No approved software for this OS yet.</div>';
+}
+
+function validateImage(s) {
+  let ok = true;
+  ok &= setErr("img-name-err", RX.image.test(s.name) ? "" : "3-50 characters: lowercase letters, digits and hyphens");
+  ok &= setErr("img-owner-err", s.owner.length >= 2 ? "" : "Required");
+  ok &= setErr("img-targets-err", s.targets.length ? "" : "Pick at least one target");
+  return !!ok;
+}
+
+function updateImage() {
+  const s = imgState();
+  $("img-hvm-wrap").hidden = !s.targets.some((t) => t !== "docker");
+  $("img-hct-wrap").hidden = !s.targets.includes("docker");
+  const exists = s.name in D.images;
+  const ref = "i<issue>";
+  kv($("img-kv"), [
+    ["Action", exists ? "update existing image" : "add new image"],
+    ["Branch", `portal/image/${s.name || "<name>"}-${today()}-${ref}`],
+    ["PR title", exists ? `chore(image): update image ${s.name}` : `feat(image): add image ${s.name || "<name>"}`],
+  ]);
+  const clean = Object.fromEntries(Object.entries(s).filter(([, v]) => v !== "" && !(Array.isArray(v) && !v.length && v !== s.software)));
+  $("img-preview").textContent = JSON.stringify(clean, null, 2);
+  $("img-submit").disabled = !validateImage(s);
+}
+
+function loadExistingImage() {
+  const name = $("img-existing").value;
+  const img = D.images[name];
+  if (!img) { $("img-name").value = ""; $("img-name").readOnly = false; updateImage(); return; }
+  $("img-name").value = name; $("img-name").readOnly = true;
+  $("img-owner").value = img.owner; $("img-desc").value = img.description || "";
+  $("img-os").value = img.os;
+  renderImageOptions(false);
+  document.querySelectorAll("#img-targets input").forEach((i) => { i.checked = img.targets.includes(i.value); });
+  if (img.hardening.vm) $("img-hvm").value = img.hardening.vm;
+  if (img.hardening.container) $("img-hct").value = img.hardening.container;
+  renderSoftware(img.software);
+  document.querySelector(`input[name=img-promo][value=${img.promotion || "auto"}]`).checked = true;
+  $("img-sev").value = img.fail_on_severity || "critical";
+  updateImage();
+}
+
+// ------------------------------------------------------------- VM form
+function vmState() {
+  const state = document.querySelector("input[name=vm-state]:checked").value;
+  const s = { kind: "vm", state, name: $("vm-name").value.trim(), owner: $("vm-owner").value.trim() };
+  if (state === "absent") return s;
+  Object.assign(s, {
+    environment: $("vm-env").value, description: $("vm-desc").value.trim(),
+    cloud: $("vm-cloud").value, image: $("vm-image").value, image_version: $("vm-version").value.trim() || "latest",
+    size: $("vm-size").value, region: $("vm-region").value, os_disk_gb: Number($("vm-disk").value),
+    admin_username: $("vm-admin").value.trim(), ssh_public_key: $("vm-key").value.trim().replace(/\s+/g, " "),
+    public_ip: $("vm-pip").checked,
+  });
+  if (s.public_ip) s.allowed_ssh_cidr = $("vm-cidr").value.trim();
+  return s;
+}
+
+function renderVmOptions() {
+  const cat = D.vm_catalog;
+  const cloud = $("vm-cloud").value;
+  const c = cat.clouds[cloud] || { sizes: {}, regions: [] };
+  const images = Object.entries(D.images).filter(([, i]) => i.targets.includes(cloud)).map(([n]) => [n, n]);
+  opt($("vm-image"), images.length ? images : [["", "No approved images for this cloud yet"]], $("vm-image").value);
+  opt($("vm-size"), Object.entries(c.sizes).map(([k, v]) => [k, `${k} (${v})`]), $("vm-size").value || "small");
+  opt($("vm-region"), c.regions.map((r) => [r, r]), $("vm-region").value);
+}
+
+function validateVm(s) {
+  let ok = true;
+  const existing = s.name in D.vms;
+  ok &= setErr("vm-name-err", !RX.vm.test(s.name) ? "3-15 characters: lowercase letters, digits, hyphens; start with a letter"
+    : (s.state === "absent" && !existing) ? "No VM with this name exists" : "");
+  ok &= setErr("vm-owner-err", s.owner.length >= 2 || (s.state === "absent" && existing) ? "" : "Required");
+  if (s.state === "present") {
+    ok &= setErr("vm-image-err", s.image ? "" : "No approved image available");
+    ok &= setErr("vm-version-err", RX.version.test(s.image_version) ? "" : "latest or a version like 2026.1103.42");
+    const d = D.vm_catalog.os_disk_gb;
+    ok &= setErr("vm-disk-err", s.os_disk_gb >= d.min && s.os_disk_gb <= d.max ? "" : `Between ${d.min} and ${d.max}`);
+    ok &= setErr("vm-admin-err", RX.user.test(s.admin_username) ? "" : "3-32 characters: lowercase, digits, - or _");
+    ok &= setErr("vm-key-err", RX.key.test(s.ssh_public_key) ? "" : "Paste a public key (ssh-ed25519 / ssh-rsa / ecdsa)");
+    if (s.public_ip) {
+      const m = RX.cidr.exec(s.allowed_ssh_cidr || "");
+      const valid = m && m.slice(1, 5).every((o) => Number(o) <= 255);
+      ok &= setErr("vm-cidr-err", !valid ? "IPv4 range like 203.0.113.0/24" : Number(m[5]) < 16 ? "Too broad: use /16 or narrower" : "");
+    }
+  }
+  return !!ok;
+}
+
+function updateVm() {
+  const s = vmState();
+  document.querySelectorAll(".vm-create").forEach((el) => { el.hidden = s.state === "absent"; });
+  $("vm-cidr-wrap").hidden = !(s.state === "present" && s.public_ip);
+  const existing = s.name in D.vms;
+  const title = s.state === "absent" ? `chore(vm): decommission vm ${s.name}`
+    : `${existing ? "chore(vm): update" : "feat(vm): create"} vm ${s.name || "<name>"} on ${s.cloud}`;
+  kv($("vm-kv"), [
+    ["Action", s.state === "absent" ? "decommission" : existing ? "update existing VM" : "create new VM"],
+    ["Branch", `portal/vm/${s.name || "<name>"}-${today()}-i<issue>`],
+    ["PR title", title],
+  ]);
+  const shown = { ...s };
+  if (shown.ssh_public_key) shown.ssh_public_key = shown.ssh_public_key.slice(0, 32) + "…";
+  $("vm-preview").textContent = JSON.stringify(shown, null, 2);
+  $("vm-submit").disabled = !validateVm(s);
+}
+
+// ------------------------------------------------------------- submit
+function submit(kind, state, noteId) {
+  const label = kind === "image" ? `image: ${state.name}` : `vm: ${state.name}` + (state.state === "absent" ? " (decommission)" : "");
+  const body = [
+    MARKER,
+    `**${kind === "image" ? "Golden image" : "VM"} request** for \`${state.name}\`, submitted from the Image Factory portal.`,
+    "",
+    "Submit this issue as it is. A bot validates the request and opens a pull request on a short-lived branch; you'll get the link here.",
+    "",
+    "```json",
+    JSON.stringify(state, null, 2),
+    "```",
+  ].join("\n");
+  const url = `${D.repo.url}/issues/new?` + new URLSearchParams({ title: `[portal] ${label}`, body }).toString();
+  const note = $(noteId);
+  if (url.length > 7500) {
+    note.className = "note warn";
+    note.textContent = "This request is too long for a GitHub link. Shorten the description or ask the platform team.";
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+  note.className = "note ok";
+  note.innerHTML = `GitHub opened in a new tab. Click <b>Submit new issue</b> there. The bot replies with the pull request link within a minute. <a href="${D.repo.url}/issues?q=is%3Aissue+%22%5Bportal%5D%22+author%3A%40me" target="_blank" rel="noopener">Your requests ↗</a>`;
+}
+
+// ------------------------------------------------------------- init
+async function init() {
+  try {
+    D = await (await fetch("data/catalog.json", { cache: "no-store" })).json();
+  } catch (e) {
+    $("load-error").hidden = false;
+    $("load-error").textContent = "Couldn't load the catalog (data/catalog.json). Run: python3 scripts/portal/render.py pages";
+    return;
+  }
+  $("repo-link").href = D.repo.url;
+  $("footer").textContent = `Catalog generated ${D.generated_at} from ${D.repo.full_name}. Forms only offer what the pipeline accepts.`;
+
+  opt($("img-existing"), [["", "New image"], ...Object.keys(D.images).map((n) => [n, n])]);
+  opt($("img-os"), Object.entries(D.os).map(([k, v]) => [k, v.display_name]));
+  opt($("img-sev"), D.severities.map((s) => [s, s]), "critical");
+  renderImageOptions(false);
+  $("img-existing").onchange = loadExistingImage;
+  $("img-os").onchange = () => { renderImageOptions(true); updateImage(); };
+  $("image-form").addEventListener("input", (e) => {
+    if (e.target.closest("#img-targets")) renderSoftware();
+    updateImage();
+  });
+  $("img-submit").onclick = () => submit("image", imgState(), "img-note");
+  updateImage();
+
+  const cat = D.vm_catalog;
+  opt($("vm-env"), cat.environments.map((e) => [e, e]));
+  opt($("vm-cloud"), Object.entries(cat.clouds).filter(([, c]) => c.enabled).map(([k]) => [k, k]));
+  $("vm-disk").value = cat.os_disk_gb.default; $("vm-disk").min = cat.os_disk_gb.min; $("vm-disk").max = cat.os_disk_gb.max;
+  $("vm-admin").value = cat.admin_username_default;
+  $("vm-names").innerHTML = Object.keys(D.vms).map((n) => `<option value="${esc(n)}">`).join("");
+  renderVmOptions();
+  $("vm-cloud").onchange = () => { renderVmOptions(); updateVm(); };
+  $("vm-form").addEventListener("input", updateVm);
+  $("vm-form").addEventListener("change", updateVm);
+  $("vm-submit").onclick = () => submit("vm", vmState(), "vm-note");
+  updateVm();
+
+  const u = D.repo.url;
+  $("track-links").insertAdjacentHTML("beforeend", [
+    [`${u}/pulls?q=is%3Apr+is%3Aopen+label%3Aportal`, "Open portal pull requests", "Waiting for review"],
+    [`${u}/issues?q=is%3Aissue+%22%5Bportal%5D%22+author%3A%40me`, "My portal requests", "Issues you submitted, with the bot's replies"],
+    [`${u}/actions/workflows/image-factory.yml`, "Image builds", "Packer builds, SBOMs, scans and promotions"],
+    [`${u}/actions/workflows/vm-provision.yml`, "VM provisioning", "Terraform runs after merge, with VM IPs in the summary"],
+    [`${u}/releases`, "Image releases", "SBOMs, scan reports and catalog records per version"],
+  ].map(([href, t, d]) => `<a href="${href}" target="_blank" rel="noopener">${t} ↗<small>${d}</small></a>`).join(""));
+
+  const tab = location.hash.slice(1);
+  if (["image", "vm", "track"].includes(tab)) document.querySelector(`nav button[data-tab=${tab}]`).click();
+}
+init();
+</script>
+</body>
+</html>
