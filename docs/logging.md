@@ -12,7 +12,8 @@ where it goes, how to turn on more detail, and how to read it.
 | PR checks (`pr-standards`, `lint`, `plan`) | rule that failed; plan decisions per image (`plan_select`, `plan_image`) | job log, `plan` artifact (`build/logs/`) |
 | Image build (`build <image> / <target>`) | `packer.log`, `ansible.log`, `grype.log`, `events.jsonl`, `run-context.json`, optional `packer-debug.log` | `output-<image>-<target>` artifact, folder `logs/` |
 | Promotion | `events.jsonl`, `run-context.json` | `logs-promote-<image>-<target>` artifact |
-| VM provisioning (`vm-provision`) | `terraform-init.log`, `terraform-apply.log` / `-destroy.log`, optional `terraform-debug.log` | `logs-vm-<name>` artifact |
+| VM provisioning (`vm-provision`, Azure and AWS) | `terraform-init.log`, `terraform-apply.log` / `-destroy.log`, optional `terraform-debug.log` | `logs-vm-<name>` artifact |
+| Base image check (`base-images`, weekly) | one line per OS and cloud with what it resolves to | run summary, `logs-base-images-<run>` artifact |
 | Inside the image | `/etc/image-factory/build-info.json` (Linux), `C:\ProgramData\image-factory\build-info.json` (Windows): image, version, target, hardening profile, software, installed hotfixes | the image itself |
 
 Artifacts are kept 90 days (30 for portal and plan logs, 7 for debug runs).
@@ -100,14 +101,32 @@ Windows builds also need permission to create a temporary Key Vault in the
 build resource group (Contributor covers it) and the `Microsoft.KeyVault`
 resource provider registered.
 
+### aws-oidc
+`Not authorized to perform sts:AssumeRoleWithWebIdentity`: the IAM role's
+trust policy doesn't match the run. Builds run on `main` and promote in the
+`images-aws(-approval)` environments; VM changes run on `main`. Re-run
+`scripts/bootstrap/deploy-github-aws.sh` (it passes the repo's immutable IDs).
+
+### aws-iam
+`UnauthorizedOperation` / `AccessDenied`: the role lacks an action. The
+message names it. Builds use `image-factory-packer` (`terraform/factory/aws/main.tf`),
+VMs use `image-factory-vm-provision` (`vm.tf`). The VM role may only change
+resources tagged `ManagedBy=image-factory`.
+
+### aws-capacity
+`InsufficientInstanceCapacity` / `VcpuLimitExceeded`: no capacity or quota
+for the instance type. Pick another size or raise the quota.
+
 ### azure-quota
 `QuotaExceeded` / `SkuNotAvailable`: not enough vCPU quota for the size, or
 the size isn't offered in the region. Use a smaller size in the request's
 `azure.vm_size`, or request quota.
 
 ### marketplace-terms
-Some marketplace images (Rocky, CIS images) need their terms accepted once
-per subscription: `az vm image terms accept --urn <publisher>:<offer>:<sku>:latest`.
+Some marketplace images need their terms accepted once: Azure
+`az vm image terms accept --urn <publisher>:<offer>:<sku>:latest`; AWS
+`OptInRequired` means subscribing to the product in the AWS Marketplace
+console. The catalog uses vendors' public images, which need neither.
 
 ### winrm
 `Timeout waiting for WinRM`: the Windows build VM didn't answer on 5986.

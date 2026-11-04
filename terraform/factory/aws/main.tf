@@ -5,6 +5,8 @@
 #     which makes a later move from one to the other a non-event)
 #   - Dedicated build VPC with a public subnet (GitLab SaaS runners SSH in)
 #   - Customer-managed KMS key so encrypted AMIs can be shared
+#   - Workload VPC, VM-provision role and instance profile for self-service
+#     EC2 instances (vm.tf)
 # Apply once per factory account, then copy output "ci_variables" into
 # GitHub repository variables or GitLab CI/CD variables (same names).
 # =============================================================================

@@ -9,17 +9,22 @@ clouds:
     # VMs join the shared workload VNet created by terraform/factory/azure,
     # which lives in the gallery's region.
     regions: [southeastasia]
+    admin_username_default: azureuser # changing it would recreate VMs that rely on it
     sizes:
       small: Standard_B2s       # 2 vCPU, 4 GiB
       medium: Standard_D2s_v5   # 2 vCPU, 8 GiB
       large: Standard_D4s_v5    # 4 vCPU, 16 GiB
   aws:
-    enabled: false              # turn on once the AWS foundation is deployed
+    # Turned on by scripts/bootstrap/deploy-github-aws.sh (through a PR) once
+    # the AWS foundation exists. Instances join the workload VPC created by
+    # terraform/factory/aws in this region.
+    enabled: false
     regions: [ap-southeast-1]
+    admin_username_default: cloudadmin # added by cloud-init next to the image's default user
     sizes:
-      small: t3.small
-      medium: t3.medium
-      large: t3.large
+      small: t3.small           # 2 vCPU, 2 GiB
+      medium: t3.medium         # 2 vCPU, 4 GiB
+      large: m7i.large          # 2 vCPU, 8 GiB
 
 environments: [dev, test, prod]
 
@@ -28,4 +33,6 @@ os_disk_gb:
   max: 512
   default: 30
 
+# Fallback when a cloud has no admin_username_default of its own. Requests
+# store the resolved name, so changing a default never touches existing VMs.
 admin_username_default: azureuser

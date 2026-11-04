@@ -48,21 +48,35 @@ spec:
           enum:
             - amazonlinux-2023
             - fedora-44
+            - fedora-45
+            - rhel-10
             - rhel-9
+            - rocky-10
             - rocky-9
             - sles-15
+            - sles-16
+            - ubi10-openshift
             - ubi9-openshift
             - ubuntu-2404
+            - ubuntu-2604
             - windows-2022
+            - windows-2025
           enumNames:
-            - 'Amazon: Amazon Linux 2023 (preview)'
-            - 'Fedora Project: Fedora 44 (preview)'
-            - 'Red Hat: Red Hat Enterprise Linux 9 (preview)'
-            - 'Rocky Linux: Rocky Linux 9 (preview)'
-            - 'SUSE: SUSE Linux Enterprise Server 15 SP7 (preview)'
-            - 'Red Hat: Red Hat UBI 9 for OpenShift (container) (preview)'
+            - 'Amazon: Amazon Linux 2023 (latest)'
+            - 'Fedora Project: Fedora 44'
+            - 'Fedora Project: Fedora 45 (latest)'
+            - 'Red Hat: Red Hat Enterprise Linux 10 (latest)'
+            - 'Red Hat: Red Hat Enterprise Linux 9'
+            - 'Rocky Linux: Rocky Linux 10 (latest)'
+            - 'Rocky Linux: Rocky Linux 9'
+            - 'SUSE: SUSE Linux Enterprise Server 15 SP7'
+            - 'SUSE: SUSE Linux Enterprise Server 16.0 (latest)'
+            - 'Red Hat: Red Hat UBI 10 for OpenShift (container) (latest)'
+            - 'Red Hat: Red Hat UBI 9 for OpenShift (container)'
             - 'Canonical: Ubuntu 24.04 LTS'
-            - 'Microsoft: Windows Server 2022 Datacenter (preview)'
+            - 'Canonical: Ubuntu 26.04 LTS (latest)'
+            - 'Microsoft: Windows Server 2022 Datacenter'
+            - 'Microsoft: Windows Server 2025 Datacenter (latest)'
         targets:
           title: Targets
           type: array

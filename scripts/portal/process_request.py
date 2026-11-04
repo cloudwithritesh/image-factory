@@ -268,6 +268,11 @@ def image_os_family(name: str) -> str:
     return (ifc.load_catalogs()["os"].get(os_key) or {}).get("family", "linux")
 
 
+def admin_default(catalog: dict, cloud: str) -> str:
+    """Admin user when a request doesn't name one: the cloud's default, else the global one."""
+    return (catalog["clouds"].get(cloud) or {}).get("admin_username_default", catalog["admin_username_default"])
+
+
 def build_vm_request(form: dict, requested_by: str, existing: dict | None) -> dict:
     catalog = yaml.safe_load(VM_CATALOG.read_text(encoding="utf-8"))
     name = text(form, "name")
@@ -293,7 +298,7 @@ def build_vm_request(form: dict, requested_by: str, existing: dict | None) -> di
         spec["os_disk_gb"] = int(disk)
     except (TypeError, ValueError) as exc:
         raise RequestError("os_disk_gb must be a number") from exc
-    spec["admin_username"] = text(form, "admin_username", spec.get("admin_username", catalog["admin_username_default"]))
+    spec["admin_username"] = text(form, "admin_username", spec.get("admin_username", admin_default(catalog, spec["cloud"])))
     spec["ssh_public_key"] = text(form, "ssh_public_key", spec.get("ssh_public_key"))
     spec["public_ip"] = as_bool(form.get("public_ip"), spec.get("public_ip", False))
     if spec["public_ip"]:

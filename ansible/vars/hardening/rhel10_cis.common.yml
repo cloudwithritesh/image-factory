@@ -1,0 +1,30 @@
+---
+# Shared overrides for ansible-lockdown/RHEL10-CIS 1.1.2
+# (CIS Red Hat Enterprise Linux 10 Benchmark; also used for Rocky 10).
+# Every deviation from the role defaults is listed in
+# docs/hardening-exceptions.md. Keep that file and this one in step.
+
+# No audit binary (goss) on the image, and no reboot in the middle of the role.
+setup_audit: false
+run_audit: false
+skip_reboot: true
+
+# EXCEPTION 5.2.4 "Ensure users must provide password for escalation":
+# same reason as Ubuntu. The build user has no password and the role's
+# pre-check aborts; cloud-init sets NOPASSWD for the default user anyway.
+rhel10cis_rule_5_2_4: false
+
+# EXCEPTION sshd AllowUsers: the role defaults it to the build user, which
+# is deleted before capture (Azure) and differs from the login user of VMs
+# launched later. Access is limited by keys and NSGs instead.
+rhel10cis_sshd_allowusers: ""
+
+# Firewall: firewalld with the default zone (SSH allowed in).
+rhel10cis_firewall: firewalld
+
+# GRUB password is a site decision (needs a real hash from a secret).
+rhel10cis_set_boot_pass: false
+
+# Keep the crypto policy at DEFAULT (FUTURE breaks some cloud agents);
+# raise it per workload.
+rhel10cis_crypto_policy: DEFAULT

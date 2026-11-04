@@ -101,3 +101,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "workload_vpc_cidr" {
+  description = "CIDR of the VPC for self-service EC2 instances"
+  type        = string
+  default     = "10.70.0.0/16"
+}
+
+variable "workload_nat_gateway" {
+  description = "One NAT gateway so private instances can reach package mirrors and SSM (about USD 35/month plus data)"
+  type        = bool
+  default     = true
+}
+
+variable "tf_state_bucket" {
+  description = "S3 bucket holding Terraform state (created by deploy-github-aws.sh); the vm-provision role gets access to vms/*"
+  type        = string
+  default     = ""
+}

@@ -20,28 +20,80 @@ curl:
   description: curl CLI
   type: package
   packages: [curl]
-  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15]
+  os:
+    - ubuntu-2404
+    - ubuntu-2604
+    - rhel-9
+    - rhel-10
+    - ubi9-openshift
+    - ubi10-openshift
+    - rocky-9
+    - rocky-10
+    - amazonlinux-2023
+    - fedora-44
+    - fedora-45
+    - sles-15
+    - sles-16
   targets: [aws, azure, docker]
 
 jq:
   description: jq JSON processor
   type: package
   packages: [jq]
-  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15]
+  os:
+    - ubuntu-2404
+    - ubuntu-2604
+    - rhel-9
+    - rhel-10
+    - ubi9-openshift
+    - ubi10-openshift
+    - rocky-9
+    - rocky-10
+    - amazonlinux-2023
+    - fedora-44
+    - fedora-45
+    - sles-15
+    - sles-16
   targets: [aws, azure, docker]
 
 unzip:
   description: unzip
   type: package
   packages: [unzip]
-  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15]
+  os:
+    - ubuntu-2404
+    - ubuntu-2604
+    - rhel-9
+    - rhel-10
+    - ubi9-openshift
+    - ubi10-openshift
+    - rocky-9
+    - rocky-10
+    - amazonlinux-2023
+    - fedora-44
+    - fedora-45
+    - sles-15
+    - sles-16
   targets: [aws, azure, docker]
 
 ca-certificates:
   description: Mozilla CA bundle
   type: package
   packages: [ca-certificates]
-  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15]
+  os:
+    - ubuntu-2404
+    - ubuntu-2604
+    - rhel-9
+    - rhel-10
+    - ubi9-openshift
+    - ubi10-openshift
+    - rocky-9
+    - rocky-10
+    - amazonlinux-2023
+    - fedora-44
+    - fedora-45
+    - sles-15
+    - sles-16
   targets: [aws, azure, docker]
 
 monitoring-basics:
@@ -51,7 +103,18 @@ monitoring-basics:
   packages_by_family:
     redhat: [sysstat, iotop] # htop is in EPEL only
     suse: [sysstat, iotop]
-  os: [ubuntu-2404, rhel-9, rocky-9, amazonlinux-2023, fedora-44, sles-15]
+  os:
+    - ubuntu-2404
+    - ubuntu-2604
+    - rhel-9
+    - rhel-10
+    - rocky-9
+    - rocky-10
+    - amazonlinux-2023
+    - fedora-44
+    - fedora-45
+    - sles-15
+    - sles-16
   targets: [aws, azure]
 
 node-exporter:
@@ -64,7 +127,18 @@ node-exporter:
   unarchive: true
   strip_components: 1
   bin_links: [node_exporter]
-  os: [ubuntu-2404, rhel-9, rocky-9, amazonlinux-2023, fedora-44, sles-15]
+  os:
+    - ubuntu-2404
+    - ubuntu-2604
+    - rhel-9
+    - rhel-10
+    - rocky-9
+    - rocky-10
+    - amazonlinux-2023
+    - fedora-44
+    - fedora-45
+    - sles-15
+    - sles-16
   targets: [aws, azure]
 
 corp-root-ca:
@@ -78,7 +152,22 @@ corp-root-ca:
     windows: C:\ProgramData\image-factory\corp-root-ca.crt
   mode: "0644"
   notify: update-ca-certificates
-  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15, windows-2022]
+  os:
+    - ubuntu-2404
+    - ubuntu-2604
+    - rhel-9
+    - rhel-10
+    - ubi9-openshift
+    - ubi10-openshift
+    - rocky-9
+    - rocky-10
+    - amazonlinux-2023
+    - fedora-44
+    - fedora-45
+    - sles-15
+    - sles-16
+    - windows-2022
+    - windows-2025
   targets: [aws, azure, docker]
 
 # ---- Windows ----------------------------------------------------------------------
@@ -86,19 +175,19 @@ corp-root-ca:
   description: 7-Zip file archiver
   type: choco
   packages: [7zip.install]
-  os: [windows-2022]
+  os: [windows-2022, windows-2025]
   targets: [aws, azure]
 
 powershell-7:
   description: PowerShell 7 (pwsh)
   type: choco
   packages: [powershell-core]
-  os: [windows-2022]
+  os: [windows-2022, windows-2025]
   targets: [aws, azure]
 
 sysinternals:
   description: Sysinternals Suite troubleshooting tools
   type: choco
   packages: [sysinternals]
-  os: [windows-2022]
+  os: [windows-2022, windows-2025]
   targets: [aws, azure]

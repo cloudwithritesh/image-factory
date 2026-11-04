@@ -50,6 +50,29 @@ fix something that took more than a few minutes to understand.
   allowed token; start it by hand: Actions → image-factory → Run workflow →
   `requests/ubuntu-2404-base.yaml`.
 
+## AWS
+
+### Least privilege for EC2 self-service
+- **Decision:** separate role `image-factory-vm-provision` (trusts `main`
+  only) from the Packer role; mutating EC2 calls require
+  `ManagedBy=image-factory`, which the module sets with `default_tags`.
+- **Watch for:** `UnauthorizedOperation` on a new resource type the module
+  starts using; add the action in `terraform/factory/aws/vm.tf` (triage
+  signature `aws-iam`).
+
+### Changing a default can recreate VMs
+- **Found by:** automated review on PR #8: switching `admin_username_default`
+  to `cloudadmin` would change Azure VMs whose files omit `admin_username`,
+  and Azure replaces a VM (and its OS disk) when the admin user changes.
+- **Fix:** per-cloud defaults in `catalog/vm.yaml` (Azure keeps `azureuser`,
+  AWS `cloudadmin`); a test pins the Azure fallback.
+- **Rule:** any default that feeds a ForceNew argument is part of the
+  contract with existing VMs; never change it without migrating the files.
+
+### Ubuntu 26.04 needs x86-64-v3 CPUs
+- Canonical builds 26.04 AMD64 images for x86-64-v3 (Haswell+). All offered
+  sizes qualify; don't add pre-Haswell families (m3, c3, some t2 hosts) for 26.04.
+
 ## Azure and OIDC
 
 ### AADSTS700213: no matching federated identity record
@@ -73,6 +96,29 @@ fix something that took more than a few minutes to understand.
 ### Removing the old shared image definition would have destroyed it
 - **Fix:** `removed { from = azurerm_shared_image.os  lifecycle { destroy = false } }`
   when moving to one definition per request.
+
+## Catalog
+
+### "Preview" read as "unstable OS"
+- **Symptom:** the user asked why OSes were preview-only and wanted stable
+  latest versions.
+- **Cause:** "preview" was our label for "not yet built through the
+  pipeline", not about the OS. Several entries were also one major behind.
+- **Fix:** `release: latest | previous` (N and N-1 of each vendor); the
+  weekly `base-images` workflow proves the base images resolve.
+- **Rule:** labels in the portal describe the OS release, never our
+  internal confidence; track pipeline maturity in docs and issues.
+
+### AMI name filters matched the wrong product variants
+- **Cause:** `suse-sles-15-sp7-v*-hvm-ssd-x86_64` also matches
+  `...-v<date>-ecs-hvm-ssd...` (and app/BYOS variants on SLES 16).
+- **Fix:** `v????????` (exactly the 8-digit date).
+- **Rule:** after changing a filter, run `check_base_images.py` and read
+  the AMI *name* it resolves to, not just "found".
+
+### SLES 16 has a new Python, SLES 15 an old one
+- **Fix:** bootstrap installs `python311` only on SLES 15
+  (`ansible_python: /usr/bin/python3.11`); SLES 16 uses its python3 (3.13).
 
 ## Hardening (Ansible / CIS)
 

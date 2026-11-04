@@ -239,5 +239,60 @@ class MultiOS(unittest.TestCase):
         self.assertIn("Linux only", r["error"])
 
 
+class Aws(unittest.TestCase):
+    """EC2 self-service once AWS is enabled in catalog/vm.yaml."""
+
+    def setUp(self):
+        self.repo = Repo()
+        vm_cat = self.repo.root / "catalog/vm.yaml"
+        text = vm_cat.read_text()
+        head, tail = text.split("\n  aws:\n", 1)
+        vm_cat.write_text(head + "\n  aws:\n" + tail.replace("    enabled: false", "    enabled: true", 1))
+
+    def tearDown(self):
+        self.repo.close()
+
+    def test_ec2_request_and_tfvars(self):
+        r = self.repo.run(issue({"kind": "image", "name": "ubuntu-2404-base", "owner": "platform",
+                                 "os": "ubuntu-2404", "targets": ["aws", "azure", "docker"]}, number=400))
+        self.assertTrue(r["ok"], r)
+        r = self.repo.run(dispatch("vm", {**VM, "name": "api-01", "cloud": "aws", "region": "ap-southeast-1",
+                                          "size": "medium"}))
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["title"], "feat(vm): create vm api-01 on aws")
+        out = self.repo.tmp / "tfvars.json"
+        p = subprocess.run([sys.executable, str(self.repo.root / "scripts/portal/vm_tfvars.py"),
+                            str(self.repo.root / "vms/api-01.yaml"), "--out", str(out)],
+                           capture_output=True, text=True, check=False,
+                           env={**os.environ, "FACTORY_LOG_DIR": str(self.repo.tmp / "logs")})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("cloud=aws", p.stdout)
+        tfvars = json.loads(out.read_text())
+        self.assertEqual(tfvars["vm_size"], "t3.medium")
+        self.assertEqual(tfvars["admin_username"], "cloudadmin")  # AWS default
+        self.assertEqual(set(tfvars), {"name", "owner", "environment", "requested_by", "image", "image_version",
+                                       "vm_size", "region", "os_disk_gb", "admin_username", "ssh_public_key",
+                                       "public_ip", "allowed_ssh_cidr"})
+
+    def test_azure_keeps_its_admin_default(self):
+        # A hand-written Azure VM file without admin_username must keep
+        # resolving to azureuser: changing it would recreate the VM.
+        vm = self.repo.root / "vms/old-01.yaml"
+        vm.write_text("apiVersion: imagefactory/v1\nkind: VirtualMachine\nmetadata:\n  name: old-01\n"
+                      "  owner: web\n  environment: dev\nspec:\n  cloud: azure\n  image: ubuntu-2404-base\n"
+                      "  size: small\n  region: southeastasia\n  ssh_public_key: " + KEY + "\n")
+        out = self.repo.tmp / "old.json"
+        p = subprocess.run([sys.executable, str(self.repo.root / "scripts/portal/vm_tfvars.py"), str(vm), "--out", str(out)],
+                           capture_output=True, text=True, check=False,
+                           env={**os.environ, "FACTORY_LOG_DIR": str(self.repo.tmp / "logs")})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(out.read_text())["admin_username"], "azureuser")
+
+    def test_ec2_needs_an_aws_image(self):
+        r = self.repo.run(dispatch("vm", {**VM, "name": "api-02", "cloud": "aws", "region": "ap-southeast-1"}))
+        self.assertFalse(r["ok"], r)
+        self.assertIn("isn't built for aws", r["error"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

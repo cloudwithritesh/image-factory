@@ -4,12 +4,15 @@ Hardening roles, pinned in `ansible/requirements.yml`:
 
 | OS | Role | Benchmark |
 |---|---|---|
+| Ubuntu 26.04 (VMs) | [ansible-lockdown/UBUNTU26-CIS](https://github.com/ansible-lockdown/UBUNTU26-CIS) **0.9.0** (first public release) | CIS Ubuntu Linux 26.04 LTS v1.0.0 |
 | Ubuntu 24.04 | [ansible-lockdown/UBUNTU24-CIS](https://github.com/ansible-lockdown/UBUNTU24-CIS) **1.8.0** | CIS Ubuntu Linux 24.04 LTS v1.0.0 |
+| RHEL 10, Rocky 10 | [ansible-lockdown/RHEL10-CIS](https://github.com/ansible-lockdown/RHEL10-CIS) **1.1.2** | CIS RHEL 10 |
 | RHEL 9, Rocky 9 | [ansible-lockdown/RHEL9-CIS](https://github.com/ansible-lockdown/RHEL9-CIS) **2.4.2** | CIS RHEL 9 v2.0.0 |
 | Amazon Linux 2023 | [ansible-lockdown/AMAZON2023-CIS](https://github.com/ansible-lockdown/AMAZON2023-CIS) **1.5.0** | CIS Amazon Linux 2023 |
+| Windows Server 2025 | [ansible-lockdown/Windows-2025-CIS](https://github.com/ansible-lockdown/Windows-2025-CIS) **1.2.2** | CIS Windows Server 2025 (Member Server) |
 | Windows Server 2022 | [ansible-lockdown/Windows-2022-CIS](https://github.com/ansible-lockdown/Windows-2022-CIS) **4.2.0** | CIS Windows Server 2022 (Member Server) |
-| Fedora, SLES 15, all non-Ubuntu containers | `ansible/roles/baseline` (in this repo) | Factory baseline: the controls the benchmarks share (see below) |
-| UBI 9 for OpenShift | `ansible/roles/openshift` (baseline + OpenShift conventions) | OpenShift image guidelines |
+| Fedora 44/45, SLES 15/16, Ubuntu 26.04 containers, all non-Ubuntu containers | `ansible/roles/baseline` (in this repo) | Factory baseline: the controls the benchmarks share (see below) |
+| UBI 9/10 for OpenShift | `ansible/roles/openshift` (baseline + OpenShift conventions) | OpenShift image guidelines |
 
 Each table lists every change from a role's defaults. It must match
 `ansible/vars/hardening/`. Your security team should review it, and it
@@ -28,6 +31,35 @@ should be re-checked whenever a role version changes.
 | EC2-incompatible tasks | aws | `system_is_ec2: true` | Role-provided switch for EC2 (GRUB, reboot) | — |
 | Container mode | cis-l1-container | `system_is_container: true` and the role's `vars/is_container.yml` | Kernel, boot loader, firewall, auditd, AIDE, AppArmor and time sync controls don't apply inside containers. In this mode the role also skips most of section 5 (SSH, sudo, PAM, password ageing) by design. | Host and runtime hardening (Kubernetes PSA, seccomp, read-only rootfs, non-root user) |
 | Container extras (found in test builds) | cis-l1-container | Off: 1.6.1 dynamic-MOTD PAM edit, 2.1.22, 2.3.1.1, 2.3.3.x, 2.4.1.1, 3.3.x, all 6.1.x | No sshd PAM file, no systemd, no daemons (cron, chrony), `/proc/sys` read-only, logs go to stdout. The role's `is_container.yml` doesn't cover these. | Host/node hardening and the container runtime's logging |
+
+## Ubuntu 26.04 (UBUNTU26-CIS 0.9.0)
+
+0.9.0 is the role's first public release (the CIS benchmark itself is
+v1.0.0). We use it, as agreed, with the same build-safe overrides as Ubuntu
+24.04; re-review this section when the role reaches 1.x.
+
+| Control / setting | Profile(s) | What we do | Why |
+|---|---|---|---|
+| Level selection | cis-l1 | `--skip-tags level2-server`, `ubtu26cis_level_2: false` | Level 1 baseline |
+| 5.2.4 Password for privilege escalation | all | `ubtu26cis_rule_5_2_4: false` | As for Ubuntu 24.04 |
+| ufw outbound ports | all | Same allow-list as Ubuntu 24.04 (+32526/tcp on Azure) | Same reasons |
+| Boot loader password, audit, reboot | all | Not set / off / skipped | As for Ubuntu 24.04 |
+| Containers | ubuntu-2604 containers | CIS role not used; `baseline-container` instead | The 24.04 role needed many container exclusions found by test builds; the 26.04 role hasn't been through that yet |
+
+## RHEL 10 and Rocky 10 (RHEL10-CIS 1.1.2)
+
+Same overrides as RHEL 9 below, with the `rhel10cis_` prefix: Level 2
+skipped for cis-l1, 5.2.4 off, `sshd_allowusers` empty, firewalld, no
+boot loader password, crypto policy DEFAULT, no audit, no reboot; RHEL-family
+containers use `baseline-container`.
+
+## Windows Server 2025 (Windows-2025-CIS 1.2.2)
+
+Same approach as Windows Server 2022 below (`win25cis_` prefix,
+`memberserver`, `win_skip_for_test: true`). The 2025 role's skip list has
+two more controls, both domain-member related: **2.2.3** (network logon
+rights) and **2.2.22** (deny network logon). Apply all 13 with GPO or Intune
+after deployment.
 
 ## RHEL 9 and Rocky 9 (RHEL9-CIS)
 
@@ -61,9 +93,9 @@ should be re-checked whenever a role version changes.
 | 18.10.89.x, 18.10.90.1 WinRM client/service auth, remote shell | all | Skipped | Packer and Ansible need WinRM until sysprep | GPO after deployment; sysprep removes the build listener on AWS |
 | Reboot | all | `skip_reboot: true` | Packer restarts the VM after Ansible | — |
 
-## Factory baseline (Fedora, SLES 15, containers)
+## Factory baseline (Fedora, SLES, containers)
 
-No maintained open-source CIS role exists for Fedora or SLES 15, and the CIS
+No maintained open-source CIS role exists for Fedora or SLES 15/16, and the CIS
 roles target full systems rather than containers. The `baseline` role applies
 the controls every benchmark shares:
 
@@ -82,7 +114,7 @@ the controls every benchmark shares:
 them. For full CIS on SLES, use SUSE's CIS-hardened marketplace images or
 OpenSCAP (`scap-security-guide`) in a later phase.
 
-## UBI 9 for OpenShift
+## UBI 9 / UBI 10 for OpenShift
 
 `openshift` = container baseline + user `default` (UID 1001) in group 0,
 group-writable `/opt/app-root` and `/opt/app-root/src`, image `USER 1001`

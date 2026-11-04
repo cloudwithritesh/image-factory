@@ -311,7 +311,7 @@ function imgState() {
 function renderImageOptions(keepSelection) {
   const os = $("img-os").value;
   const osCfg = D.os[os] || { targets: [] };
-  $("img-os-hint").innerHTML = (osCfg.status === "preview" ? '<span class="tag">preview</span> ' : "") + esc(osCfg.notes || "");
+  $("img-os-hint").innerHTML = (osCfg.release ? `<span class="tag">${osCfg.release === "latest" ? "latest release" : "previous release"}</span> ` : "") + esc(osCfg.notes || "");
   const prev = new Set(keepSelection ? imgState().targets : osCfg.targets);
   const enabled = D.enabled_targets || ["aws", "azure", "docker"];
   $("img-targets").innerHTML = ["aws", "azure", "docker"].map((t) => {
@@ -508,11 +508,12 @@ async function init() {
   $("footer").textContent = `Catalog generated ${D.generated_at} from ${D.repo.full_name}. Forms only offer what the pipeline accepts.`;
 
   opt($("img-existing"), [["", "New image"], ...Object.keys(D.images).map((n) => [n, n])]);
-  // Operating systems grouped by vendor; preview ones are marked
+  // Operating systems grouped by vendor, newest release first
   const groups = {};
   for (const [k, v] of Object.entries(D.os)) (groups[v.vendor || "Other"] ||= []).push([k, v]);
   $("img-os").innerHTML = Object.keys(groups).sort().map((g) => `<optgroup label="${esc(g)}">` +
-    groups[g].map(([k, v]) => `<option value="${esc(k)}">${esc(v.display_name)}${v.status === "preview" ? " (preview)" : ""}</option>`).join("") +
+    groups[g].sort((a, b) => (a[1].release === "latest" ? 0 : 1) - (b[1].release === "latest" ? 0 : 1) || a[1].display_name.localeCompare(b[1].display_name))
+      .map(([k, v]) => `<option value="${esc(k)}">${esc(v.display_name)}${v.release === "latest" ? " (latest)" : ""}</option>`).join("") +
     "</optgroup>").join("");
   opt($("img-sev"), D.severities.map((s) => [s, s]), "critical");
   renderImageOptions(false);
@@ -529,10 +530,14 @@ async function init() {
   opt($("vm-env"), cat.environments.map((e) => [e, e]));
   opt($("vm-cloud"), Object.entries(cat.clouds).filter(([, c]) => c.enabled).map(([k]) => [k, k]));
   $("vm-disk").value = cat.os_disk_gb.default; $("vm-disk").min = cat.os_disk_gb.min; $("vm-disk").max = cat.os_disk_gb.max;
-  $("vm-admin").value = cat.admin_username_default;
+  // Admin user defaults per cloud until the user types their own
+  let adminTouched = false;
+  const adminDefault = () => (cat.clouds[$("vm-cloud").value] || {}).admin_username_default || cat.admin_username_default;
+  $("vm-admin").value = adminDefault();
+  $("vm-admin").addEventListener("input", () => { adminTouched = true; });
   $("vm-names").innerHTML = Object.keys(D.vms).map((n) => `<option value="${esc(n)}">`).join("");
   renderVmOptions();
-  $("vm-cloud").onchange = () => { renderVmOptions(); updateVm(); };
+  $("vm-cloud").onchange = () => { if (!adminTouched) $("vm-admin").value = adminDefault(); renderVmOptions(); updateVm(); };
   $("vm-form").addEventListener("input", updateVm);
   $("vm-form").addEventListener("change", updateVm);
   $("vm-submit").onclick = () => submit("vm", vmState(), "vm-note");

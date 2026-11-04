@@ -116,7 +116,7 @@ lint:terraform:
   script:
     - terraform fmt -check -diff -recursive terraform/
     - |
-      for dir in terraform/factory/aws terraform/factory/azure terraform/vm/azure; do
+      for dir in terraform/factory/aws terraform/factory/azure terraform/vm/azure terraform/vm/aws; do
         terraform -chdir="$dir" init -backend=false -input=false
         terraform -chdir="$dir" validate
       done
