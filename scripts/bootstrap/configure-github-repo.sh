@@ -87,8 +87,9 @@ fi
 pages_url="$(gh api "repos/${REPO}/pages" -q .html_url 2> /dev/null || true)"
 ok "GitHub Pages from the portal-pages workflow ${pages_url:+(${pages_url})}"
 if [[ -n "$pages_url" ]]; then
-  gh workflow run portal-pages.yml --repo "$REPO" --ref main > /dev/null 2>&1 \
-    && ok "started a portal-pages deployment" || true
+  if gh workflow run portal-pages.yml --repo "$REPO" --ref main > /dev/null 2>&1; then
+    ok "started a portal-pages deployment"
+  fi
 fi
 
 echo
