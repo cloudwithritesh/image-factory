@@ -60,6 +60,15 @@ fix something that took more than a few minutes to understand.
   starts using; add the action in `terraform/factory/aws/vm.tf` (triage
   signature `aws-iam`).
 
+### Changing a default can recreate VMs
+- **Found by:** automated review on PR #8: switching `admin_username_default`
+  to `cloudadmin` would change Azure VMs whose files omit `admin_username`,
+  and Azure replaces a VM (and its OS disk) when the admin user changes.
+- **Fix:** per-cloud defaults in `catalog/vm.yaml` (Azure keeps `azureuser`,
+  AWS `cloudadmin`); a test pins the Azure fallback.
+- **Rule:** any default that feeds a ForceNew argument is part of the
+  contract with existing VMs; never change it without migrating the files.
+
 ### Ubuntu 26.04 needs x86-64-v3 CPUs
 - Canonical builds 26.04 AMD64 images for x86-64-v3 (Haswell+). All offered
   sizes qualify; don't add pre-Haswell families (m3, c3, some t2 hosts) for 26.04.

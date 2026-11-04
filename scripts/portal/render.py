@@ -287,7 +287,8 @@ def vm_template(data: dict) -> dict:
                     "title": "Access",
                     "properties": {
                         "admin_username": {"title": "Admin user", "type": "string",
-                                           "default": cat["admin_username_default"]},
+                                           "default": pr.admin_default(cat, "azure"),
+                                           "ui:help": "Default: azureuser on Azure, cloudadmin on AWS"},
                         "ssh_public_key": {"title": "SSH public key", "type": "string", "ui:widget": "textarea",
                                            "ui:help": "Paste the whole line from ~/.ssh/id_ed25519.pub"},
                         "public_ip": {"title": "Public IP", "type": "boolean", "default": False},

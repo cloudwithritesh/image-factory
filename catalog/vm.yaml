@@ -9,6 +9,7 @@ clouds:
     # VMs join the shared workload VNet created by terraform/factory/azure,
     # which lives in the gallery's region.
     regions: [southeastasia]
+    admin_username_default: azureuser # changing it would recreate VMs that rely on it
     sizes:
       small: Standard_B2s       # 2 vCPU, 4 GiB
       medium: Standard_D2s_v5   # 2 vCPU, 8 GiB
@@ -19,6 +20,7 @@ clouds:
     # terraform/factory/aws in this region.
     enabled: false
     regions: [ap-southeast-1]
+    admin_username_default: cloudadmin # added by cloud-init next to the image's default user
     sizes:
       small: t3.small           # 2 vCPU, 2 GiB
       medium: t3.medium         # 2 vCPU, 4 GiB
@@ -31,6 +33,6 @@ os_disk_gb:
   max: 512
   default: 30
 
-# Created by the provisioning module on every cloud (Azure admin user; on
-# AWS, cloud-init adds it next to the image's own default user).
-admin_username_default: cloudadmin
+# Fallback when a cloud has no admin_username_default of its own. Requests
+# store the resolved name, so changing a default never touches existing VMs.
+admin_username_default: azureuser

@@ -269,10 +269,24 @@ class Aws(unittest.TestCase):
         self.assertIn("cloud=aws", p.stdout)
         tfvars = json.loads(out.read_text())
         self.assertEqual(tfvars["vm_size"], "t3.medium")
-        self.assertEqual(tfvars["admin_username"], "cloudadmin")
+        self.assertEqual(tfvars["admin_username"], "cloudadmin")  # AWS default
         self.assertEqual(set(tfvars), {"name", "owner", "environment", "requested_by", "image", "image_version",
                                        "vm_size", "region", "os_disk_gb", "admin_username", "ssh_public_key",
                                        "public_ip", "allowed_ssh_cidr"})
+
+    def test_azure_keeps_its_admin_default(self):
+        # A hand-written Azure VM file without admin_username must keep
+        # resolving to azureuser: changing it would recreate the VM.
+        vm = self.repo.root / "vms/old-01.yaml"
+        vm.write_text("apiVersion: imagefactory/v1\nkind: VirtualMachine\nmetadata:\n  name: old-01\n"
+                      "  owner: web\n  environment: dev\nspec:\n  cloud: azure\n  image: ubuntu-2404-base\n"
+                      "  size: small\n  region: southeastasia\n  ssh_public_key: " + KEY + "\n")
+        out = self.repo.tmp / "old.json"
+        p = subprocess.run([sys.executable, str(self.repo.root / "scripts/portal/vm_tfvars.py"), str(vm), "--out", str(out)],
+                           capture_output=True, text=True, check=False,
+                           env={**os.environ, "FACTORY_LOG_DIR": str(self.repo.tmp / "logs")})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(out.read_text())["admin_username"], "azureuser")
 
     def test_ec2_needs_an_aws_image(self):
         r = self.repo.run(dispatch("vm", {**VM, "name": "api-02", "cloud": "aws", "region": "ap-southeast-1"}))

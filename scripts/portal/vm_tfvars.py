@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         "vm_size": catalog["clouds"][spec["cloud"]]["sizes"][spec["size"]],
         "region": spec["region"],
         "os_disk_gb": spec.get("os_disk_gb", catalog["os_disk_gb"]["default"]),
-        "admin_username": spec.get("admin_username", catalog["admin_username_default"]),
+        "admin_username": spec.get("admin_username", pr.admin_default(catalog, spec["cloud"])),
         "ssh_public_key": spec["ssh_public_key"],
         "public_ip": bool(spec.get("public_ip", False)),
         "allowed_ssh_cidr": spec.get("allowed_ssh_cidr", ""),

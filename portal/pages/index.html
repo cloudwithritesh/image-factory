@@ -530,10 +530,14 @@ async function init() {
   opt($("vm-env"), cat.environments.map((e) => [e, e]));
   opt($("vm-cloud"), Object.entries(cat.clouds).filter(([, c]) => c.enabled).map(([k]) => [k, k]));
   $("vm-disk").value = cat.os_disk_gb.default; $("vm-disk").min = cat.os_disk_gb.min; $("vm-disk").max = cat.os_disk_gb.max;
-  $("vm-admin").value = cat.admin_username_default;
+  // Admin user defaults per cloud until the user types their own
+  let adminTouched = false;
+  const adminDefault = () => (cat.clouds[$("vm-cloud").value] || {}).admin_username_default || cat.admin_username_default;
+  $("vm-admin").value = adminDefault();
+  $("vm-admin").addEventListener("input", () => { adminTouched = true; });
   $("vm-names").innerHTML = Object.keys(D.vms).map((n) => `<option value="${esc(n)}">`).join("");
   renderVmOptions();
-  $("vm-cloud").onchange = () => { renderVmOptions(); updateVm(); };
+  $("vm-cloud").onchange = () => { if (!adminTouched) $("vm-admin").value = adminDefault(); renderVmOptions(); updateVm(); };
   $("vm-form").addEventListener("input", updateVm);
   $("vm-form").addEventListener("change", updateVm);
   $("vm-submit").onclick = () => submit("vm", vmState(), "vm-note");
