@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://image-factory.local/schemas/vm-request.schema.json",
+  "title": "VirtualMachine",
+  "description": "An end-user VM built from an approved golden image. Written by the portal (vms/<name>.yaml) and applied by the vm-provision workflow after the PR is merged.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "imagefactory/v1" },
+    "kind": { "const": "VirtualMachine" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "owner", "environment"],
+      "properties": {
+        "name": {
+          "description": "VM name; also the Azure resource name prefix and computer name",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,13}[a-z0-9]$"
+        },
+        "owner": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "environment": { "type": "string" },
+        "requested_by": { "type": "string" },
+        "description": { "type": "string", "maxLength": 250 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cloud", "image", "size", "region", "ssh_public_key"],
+      "properties": {
+        "cloud": { "enum": ["azure", "aws"] },
+        "image": { "type": "string", "description": "Approved image name (a file in requests/)" },
+        "image_version": {
+          "type": "string",
+          "pattern": "^(latest|\\d+\\.\\d+\\.\\d+)$",
+          "default": "latest"
+        },
+        "size": { "type": "string", "description": "T-shirt size from catalog/vm.yaml" },
+        "region": { "type": "string" },
+        "os_disk_gb": { "type": "integer" },
+        "admin_username": { "type": "string", "pattern": "^[a-z_][a-z0-9_-]{2,31}$" },
+        "ssh_public_key": {
+          "type": "string",
+          "pattern": "^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/=]{40,}( [^\\n]{0,100})?$"
+        },
+        "public_ip": { "type": "boolean", "default": false },
+        "allowed_ssh_cidr": {
+          "type": "string",
+          "pattern": "^(\\d{1,3}\\.){3}\\d{1,3}/(\\d|[12]\\d|3[0-2])$"
+        },
+        "state": { "enum": ["present", "absent"], "default": "present" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "public_ip": { "const": true } }, "required": ["public_ip"] },
+          "then": { "required": ["allowed_ssh_cidr"] }
+        }
+      ]
+    }
+  }
+}

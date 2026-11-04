@@ -1,0 +1,31 @@
+# -----------------------------------------------------------------------------
+# VM catalog: what end users can choose in the "Create a VM" form.
+# T-shirt sizes keep requests simple and costs predictable; the platform team
+# decides what each size means per cloud.
+# -----------------------------------------------------------------------------
+clouds:
+  azure:
+    enabled: true
+    # VMs join the shared workload VNet created by terraform/factory/azure,
+    # which lives in the gallery's region.
+    regions: [southeastasia]
+    sizes:
+      small: Standard_B2s       # 2 vCPU, 4 GiB
+      medium: Standard_D2s_v5   # 2 vCPU, 8 GiB
+      large: Standard_D4s_v5    # 4 vCPU, 16 GiB
+  aws:
+    enabled: false              # turn on once the AWS foundation is deployed
+    regions: [ap-southeast-1]
+    sizes:
+      small: t3.small
+      medium: t3.medium
+      large: t3.large
+
+environments: [dev, test, prod]
+
+os_disk_gb:
+  min: 30
+  max: 512
+  default: 30
+
+admin_username_default: azureuser

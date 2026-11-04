@@ -1,0 +1,172 @@
+# =============================================================================
+# Portal requests -> standard pull requests
+#
+#   GitHub Pages portal   opens an issue carrying the form (as the signed-in user)
+#   Backstage             runs this workflow with workflow_dispatch
+#
+# Both go through scripts/portal/process_request.py, which validates the
+# request against the catalogs and writes requests/<name>.yaml or
+# vms/<name>.yaml. This job then creates:
+#   branch   portal/<image|vm>/<name>-<YYYYMMDD>-<ref>   (deleted on merge/close)
+#   commit   <type>(<kind>): <subject>  + Requested-by / Request-source trailers
+#   PR       same title, labels portal + <kind>-request, "Closes #<issue>"
+#
+# Token: a GitHub App (vars.PORTAL_APP_ID + secrets.PORTAL_APP_PRIVATE_KEY)
+# is recommended. Its PRs trigger the normal PR checks and its commits show
+# as <app>[bot]. Without it, GITHUB_TOKEN is used, and this job records the
+# pr-standards check itself, because GitHub doesn't run workflows for PRs
+# created with GITHUB_TOKEN.
+# =============================================================================
+name: portal-request
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "Request kind"
+        type: choice
+        options: [image, vm]
+        required: true
+      payload:
+        description: "Form fields as JSON"
+        type: string
+        required: true
+      requested_by:
+        description: "Who asked for it (portal user)"
+        type: string
+        default: ""
+      source:
+        description: "Where the request came from"
+        type: choice
+        options: [backstage, cli]
+        default: backstage
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portal-request
+  cancel-in-progress: false
+
+jobs:
+  request:
+    # Issues: only portal issues, and only from people with repo access
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(github.event.issue.body, '<!-- portal-request:v1 -->') &&
+       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      statuses: write
+    steps:
+      - name: Bot token (GitHub App)
+        id: app
+        if: vars.PORTAL_APP_ID != ''
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.PORTAL_APP_ID }}
+          private-key: ${{ secrets.PORTAL_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ steps.app.outputs.token || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install validator dependencies
+        run: pip install pyyaml==6.0.3 jsonschema==4.26.0
+
+      - name: Process request
+        id: process
+        run: python3 scripts/portal/process_request.py --event "$GITHUB_EVENT_PATH" --out "$RUNNER_TEMP/result.json"
+
+      - name: Re-check standards and catalogs
+        run: |
+          python3 scripts/portal/standards.py check \
+            --branch "$(jq -r .branch "$RUNNER_TEMP/result.json")" \
+            --title "$(jq -r .title "$RUNNER_TEMP/result.json")"
+          python3 scripts/portal/validate_all.py
+
+      - name: Bot identity
+        id: who
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          if [[ -n "$APP_SLUG" ]]; then
+            name="${APP_SLUG}[bot]"
+            id="$(gh api "/users/${name}" -q .id)"
+            email="${id}+${name}@users.noreply.github.com"
+          else
+            name="github-actions[bot]"
+            email="41898282+github-actions[bot]@users.noreply.github.com"
+          fi
+          { echo "name=${name}"; echo "email=${email}"; } >> "$GITHUB_OUTPUT"
+
+      - name: Branch, commit and pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token || github.token }}
+          GIT_AUTHOR_NAME: ${{ steps.who.outputs.name }}
+          GIT_AUTHOR_EMAIL: ${{ steps.who.outputs.email }}
+        run: scripts/portal/open_pr.sh "$RUNNER_TEMP/result.json"
+
+      - name: Record checks (no GitHub App)
+        if: vars.PORTAL_APP_ID == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.pr.outputs.sha }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
+            -f state=success -f context=pr-standards \
+            -f description="Naming standards and catalog validation passed (portal-request)" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
+
+      - name: Reply on the issue
+        if: always() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          result="$RUNNER_TEMP/result.json"
+          if [[ -n "$PR_URL" ]]; then
+            gh issue comment "$ISSUE" --body "✅ Pull request created: ${PR_URL}
+
+          This issue closes automatically when the PR is merged."
+          else
+            error="$(jq -r '.error // "unexpected failure, see the workflow run"' "$result" 2>/dev/null || echo "unexpected failure")"
+            # shellcheck disable=SC2016  # backticks are Markdown, not shell
+            printf '❌ The request was not accepted:\n\n```\n%s\n```\n\nFix it in the portal and submit again. Details: %s\n' \
+              "$error" "$RUN_URL" > "$RUNNER_TEMP/comment.md"
+            gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/comment.md"
+            gh issue close "$ISSUE" --reason "not planned"
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+        run: |
+          result="$RUNNER_TEMP/result.json"
+          {
+            echo "### Portal request"
+            if [[ -n "$PR_URL" ]]; then
+              # shellcheck disable=SC2016  # backticks are Markdown, not shell
+              jq -r '"- **\(.title)**\n- Branch `\(.branch)`\n- Requested by @\(.requested_by) via \(.source)"' "$result"
+              echo "- PR: ${PR_URL}"
+            else
+              echo '```'
+              jq -r '.error // "failed before processing"' "$result" 2>/dev/null || echo "failed before processing"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
