@@ -1,0 +1,7 @@
+# Reviewers are requested automatically. Replace with teams as the platform grows,
+# e.g. @my-org/platform-engineering for images and @my-org/cloud-ops for VMs.
+*                 @cloudwithritesh
+/requests/        @cloudwithritesh
+/vms/             @cloudwithritesh
+/catalog/         @cloudwithritesh
+/ansible/vars/hardening/ @cloudwithritesh
