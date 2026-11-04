@@ -41,6 +41,18 @@ variable "os_key" {
   default = "ubuntu-2404"
 }
 
+variable "pkg_family" {
+  type        = string
+  description = "debian | redhat | suse: picks the package manager in the bootstrap and cleanup scripts"
+  default     = "debian"
+}
+
+variable "ansible_python_interpreter" {
+  type        = string
+  description = "Python on the target for Ansible, when the default python3 is too old (e.g. SLES 15)"
+  default     = ""
+}
+
 variable "request_labels" {
   type    = map(string)
   default = {}
@@ -232,6 +244,18 @@ variable "docker_repository" {
 variable "docker_source_url" {
   type        = string
   description = "Repository URL for the org.opencontainers.image.source label (links GHCR packages to the repo)"
+  default     = ""
+}
+
+variable "docker_user" {
+  type        = string
+  description = "USER for the container image (e.g. 1001 for OpenShift); empty keeps root"
+  default     = ""
+}
+
+variable "docker_workdir" {
+  type        = string
+  description = "WORKDIR for the container image; empty keeps the base image's"
   default     = ""
 }
 

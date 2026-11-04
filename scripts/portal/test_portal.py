@@ -62,7 +62,8 @@ class Repo:
     def run(self, event: dict) -> dict:
         ev, out = self.tmp / "event.json", self.tmp / "out.json"
         ev.write_text(json.dumps(event))
-        env = {**os.environ, "GITHUB_RUN_ID": "123456789", "GITHUB_ACTOR": "tester"}
+        env = {**os.environ, "GITHUB_RUN_ID": "123456789", "GITHUB_ACTOR": "tester",
+               "FACTORY_LOG_DIR": str(self.tmp / "logs")}
         subprocess.run([sys.executable, str(self.root / "scripts/portal/process_request.py"),
                         "--event", str(ev), "--out", str(out)], env=env, capture_output=True, check=False)
         return json.loads(out.read_text())
@@ -180,6 +181,62 @@ class Processor(unittest.TestCase):
         self.assertTrue(r["ok"], r)
         self.assertEqual(r["title"], "chore(vm): decommission vm web-01")
         self.assertIn("**decommissions**", r["body"])
+
+
+class MultiOS(unittest.TestCase):
+    """Every catalog OS can be requested through the portal and rendered."""
+
+    def setUp(self):
+        self.repo = Repo()
+        sys.path.insert(0, str(self.repo.root / "scripts"))
+        import yaml  # noqa: PLC0415
+        self.os = yaml.safe_load((self.repo.root / "catalog/os.yaml").read_text())
+        self.software = yaml.safe_load((self.repo.root / "catalog/software.yaml").read_text())
+
+    def tearDown(self):
+        self.repo.close()
+
+    def test_every_os_builds_on_enabled_targets(self):
+        enabled = {"azure", "docker"}  # catalog/vm.yaml: AWS not enabled yet
+        for n, (key, entry) in enumerate(self.os.items()):
+            targets = sorted(set(entry["targets"]) & enabled)
+            if not targets:
+                continue
+            software = [k for k, v in self.software.items()
+                        if key in v["os"] and set(v["targets"]) & set(targets) and v["type"] != "file"]
+            name = f"img-{key}"[:50]
+            r = self.repo.run(issue({"kind": "image", "name": name, "owner": "platform", "os": key,
+                                     "targets": targets, "software": software}, number=100 + n))
+            self.assertTrue(r["ok"], (key, r))
+            out = subprocess.run([sys.executable, str(self.repo.root / "scripts/imagefactory.py"), "render", name,
+                                  "--out", str(self.repo.tmp / "build")], capture_output=True, text=True, check=False,
+                                 env={**os.environ, "FACTORY_LOG_DIR": str(self.repo.tmp / "logs")})
+            self.assertEqual(out.returncode, 0, (key, out.stderr))
+            plan = json.loads(out.stdout)
+            self.assertEqual(plan["packer_template"], f"packer/{entry['family']}")
+            self.assertEqual(plan["pkg_family"], entry["pkg_family"])
+
+    def test_os_specific_rejections(self):
+        cases = [
+            ({"os": "windows-2022", "targets": ["docker"]}, "no base image for ['docker']"),
+            ({"os": "windows-2022", "targets": ["azure"], "software": ["curl"]}, "not approved for windows-2022"),
+            ({"os": "rhel-9", "targets": ["azure"], "software": ["7zip"]}, "not approved for rhel-9"),
+            ({"os": "rocky-9", "targets": ["azure"]}, "no base image for ['azure']"),
+            ({"os": "ubi9-openshift", "targets": ["docker"], "hardening_container": "cis-l1-container"},
+             "not a container profile"),
+        ]
+        for n, (form, expected) in enumerate(cases):
+            r = self.repo.run(issue({"kind": "image", "name": f"neg-{n}x", "owner": "platform", **form}, number=200 + n))
+            self.assertFalse(r["ok"], (form, r))
+            self.assertIn(expected, r["error"], r["error"])
+
+    def test_windows_image_not_offered_for_vms(self):
+        r = self.repo.run(issue({"kind": "image", "name": "win-base", "owner": "platform", "os": "windows-2022",
+                                 "targets": ["azure"]}, number=300))
+        self.assertTrue(r["ok"], r)
+        r = self.repo.run(dispatch("vm", {**VM, "image": "win-base"}))
+        self.assertFalse(r["ok"], r)
+        self.assertIn("Linux only", r["error"])
 
 
 if __name__ == "__main__":

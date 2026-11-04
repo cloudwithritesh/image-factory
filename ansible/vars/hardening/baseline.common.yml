@@ -1,0 +1,5 @@
+---
+# Shared settings for the in-repo baseline role (ansible/roles/baseline).
+# Role defaults are in roles/baseline/defaults/main.yml; deviations are in
+# docs/hardening-exceptions.md.
+baseline_umask: "027"

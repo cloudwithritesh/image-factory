@@ -130,9 +130,11 @@ ID-protected web app) means sending the same JSON.
 | `test_portal.py` | Regression tests, including the security rejections |
 
 Bot identity: a **GitHub App** (recommended; its PRs trigger the normal
-checks) or the workflow `GITHUB_TOKEN` (fallback; the processor then posts
-the `pr-standards` status itself, because GitHub doesn't run workflows for
-PRs opened with `GITHUB_TOKEN`).
+checks) or the workflow `GITHUB_TOKEN` (fallback). GitHub won't run
+`pull_request` workflows for PRs opened with `GITHUB_TOKEN` without an
+"Approve and run" click, so `start_pr_checks.sh` dispatches `pr-standards`
+and `image-factory` (lint + plan) on the PR branch; their check runs land on
+the PR's head commit and satisfy the required checks.
 
 ### 3.4 Image pipeline
 
@@ -157,9 +159,9 @@ flowchart LR
 
 | Stage | Tool | Output |
 |---|---|---|
-| Template | Packer (`packer/linux`): one `build`, three sources | identical provisioning on every target |
-| Configuration | Ansible: `ansible/image.yml`, roles `base` and `software`, hardening role from `requirements.yml` | patched, configured, CIS-hardened image; `/etc/image-factory/build-info.json` inside |
-| Hardening | ansible-lockdown **UBUNTU24-CIS 1.8.0** (CIS Ubuntu 24.04 v1.0.0) | profiles `cis-l1` (VM default), `cis-l2`, `cis-l1-container` (container default), `none` |
+| Template | Packer, one template per OS family: `packer/linux` (one `build`, sources `amazon-ebs`, `azure-arm`, `docker`; SSH) and `packer/windows` (`amazon-ebs`, `azure-arm`; WinRM over HTTPS, sysprep / EC2Launch) | identical provisioning on every target of a family |
+| Configuration | Ansible: `ansible/image.yml` (Linux; roles `base` and `software` pick apt / dnf / zypper from the OS's `pkg_family`) and `ansible/windows.yml` (Windows Update, Chocolatey, files); hardening role from `requirements.yml` | patched, configured, hardened image; `build-info.json` inside |
+| Hardening | ansible-lockdown CIS roles: **UBUNTU24-CIS 1.8.0**, **RHEL9-CIS 2.4.2** (RHEL, Rocky), **AMAZON2023-CIS 1.5.0**, **Windows-2022-CIS 4.2.0**; in-repo `baseline` (Fedora, SLES, containers) and `openshift` | per-OS profiles in `catalog/hardening.yaml`; deviations in `hardening-exceptions.md` |
 | SBOM | **Syft 1.55.0**: on the build VM after hardening; from the registry for Docker | CycloneDX + SPDX JSON |
 | Vulnerability gate | **Grype 0.120.0** on the SBOM, fail at `fail_on_severity` (default critical), `--only-fixed` | pass marker required for promotion |
 | Publish (candidate) | Azure: gallery version with `excludeFromLatest=true`, in a definition named after the request (created on first build). Docker: `:candidate-<version>` | |
@@ -207,7 +209,7 @@ one run.
 | Who can trigger cloud changes | Only workflows on `main` (`ref:refs/heads/main`) and in the environments `images-<target>` / `images-<target>-approval`. PRs and forks get no cloud access. |
 | Who can submit portal requests | Issues: only OWNER/MEMBER/COLLABORATOR (checked in the workflow `if` **and** in the processor). Backstage: users with a GitHub token that can dispatch workflows. |
 | Untrusted input | The issue body is read from the event file, never interpolated into shell. Names are pattern-checked before being used in paths. Everything is schema- and catalog-validated. |
-| Change approval | Ruleset on `main`: PR required, 1 approval incl. CODEOWNERS, `pr-standards` check, linear history, no force-push or deletion. Admins may bypass approval only on their own PRs. |
+| Change approval | Ruleset on `main`: PR required, 1 approval incl. CODEOWNERS, required checks `pr-standards` + `lint` + `plan`, linear history, no force-push or deletion. **No bypass, admins included**: the merge button stays disabled until approval and green checks. |
 | Least privilege | CI identity: Contributor on the factory RGs only (not the subscription); blob data access on the state account only. Workflows default to a read-only token; jobs request what they need. |
 | Supply chain | Tool versions pinned in `ci/versions.env`, downloads checksum-verified; Packer plugins and the CIS role pinned; SBOM for every image. |
 | Image trust | Candidates are excluded from `latest`; promotion requires the scan pass marker; VMs refuse unapproved versions. |
@@ -223,10 +225,38 @@ one run.
 | Azure images | `sig_image_factory/<image-name>/<version>` (rg-image-factory-gallery) |
 | Docker images | `ghcr.io/cloudwithritesh/image-factory/images/<name>:<version>` |
 | SBOMs, scan reports, catalog records | GitHub release `<name>-<version>` |
-| Image build info | `/etc/image-factory/build-info.json` inside every image |
+| Image build info | `/etc/image-factory/build-info.json` (Linux) or `C:\ProgramData\image-factory\build-info.json` (Windows) inside every image |
+| Pipeline logs | workflow artifacts: `output-<image>-<target>/logs/`, `logs-promote-*`, `logs-vm-*`, `logs-portal-request-*` ([logging.md](logging.md)) |
 | Terraform state | `stimgfac…/tfstate`: `image-factory/azure.tfstate`, `vms/<name>.tfstate` |
 | Platform settings | GitHub repository variables (`PKR_VAR_*`, `AZURE_*`, `VM_*`, `TF_STATE_*`) |
 | Portal | https://cloudwithritesh.github.io/image-factory/ |
+
+### 5.1 Operating systems
+
+| OS (catalog key) | Vendor | AWS | Azure | Docker base | Default hardening (VM / container) | Status |
+|---|---|---|---|---|---|---|
+| `ubuntu-2404` | Canonical | ✓ | ✓ `Canonical:ubuntu-24_04-lts:server` | `ubuntu:24.04` | CIS L1 / CIS L1 container | ga |
+| `rhel-9` | Red Hat | ✓ (PAYG) | ✓ `RedHat:RHEL:9-lvm-gen2` | UBI 9 | CIS L1 / baseline | preview |
+| `ubi9-openshift` | Red Hat | | | UBI 9 (UID 1001) | – / openshift | preview |
+| `rocky-9` | Rocky Linux | ✓ | (marketplace plan needed) | `rockylinux:9` | CIS L1 / baseline | preview |
+| `amazonlinux-2023` | Amazon | ✓ | | `amazonlinux:2023` | CIS L1 / baseline | preview |
+| `fedora-44` | Fedora Project | ✓ | (no official image) | `fedora:44` | baseline / baseline | preview |
+| `sles-15` | SUSE | ✓ (PAYG) | ✓ `SUSE:sles-15-sp7:gen2` | SLE BCI 15.7 | baseline / baseline | preview |
+| `windows-2022` | Microsoft | ✓ | ✓ `MicrosoftWindowsServer:WindowsServer:2022-datacenter-azure-edition` | | CIS L1 / – | preview |
+
+The OS entry's `family` picks the Packer template and `pkg_family` the
+package manager (apt, dnf, zypper, Chocolatey). Adding an OS is a catalog
+change plus, if needed, a hardening vars file; see
+[instructions.md](instructions.md#add-an-operating-system).
+
+### 5.2 Logging
+
+All scripts log through `scripts/ci/log.sh` / `scripts/factorylog.py`:
+readable console lines plus JSON lines (`events.jsonl`) carrying a
+correlation ID, run, job, image, version, target and portal request ref.
+Tool logs (Packer, Ansible, Grype, Terraform) are kept per job, uploaded
+even on failure, and `triage.py` writes the likely cause of a failure into
+the run summary. Details: [logging.md](logging.md).
 
 ---
 
@@ -268,7 +298,14 @@ Azure, independent of the CI platform.
 - AWS: code ready (AMI build, OIDC, KMS, SSM catalog); turn on by deploying
   `terraform/factory/aws` and setting `clouds.aws.enabled: true`. EC2
   provisioning module still to come.
-- More operating systems: RHEL 9 / Rocky 9, Amazon Linux 2023, Windows Server 2022.
+- Operating systems in preview (catalog `status: preview`): RHEL 9, Rocky 9,
+  Amazon Linux 2023, Fedora 44, SLES 15 SP7, UBI 9 for OpenShift, Windows
+  Server 2022. They become `ga` after a first successful build and review.
+- Self-service VMs are Linux only: Windows VMs need a credential flow
+  (e.g. password in Key Vault, Entra login) before `terraform/vm/azure` can
+  create them.
+- OpenShift nodes (RHCOS) are managed by the cluster; the factory builds
+  OpenShift-ready container base images, not node images.
 - Backstage: Entra ID sign-in and hosting (e.g. Azure Container Apps).
 - Hosted runners reach build VMs over public IPs (restricted to the runner);
   self-hosted runners in the build network give fully private builds.

@@ -7,8 +7,12 @@
 #   3. upload a catalog record (JSON) that the portal reads
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+export FACTORY_LOG_DIR="build/${IMAGE_NAME:?IMAGE_NAME is required}/promote-logs"
+export FACTORY_LOG_COMPONENT=promote
 # shellcheck source=scripts/ci/lib.sh
 source scripts/ci/lib.sh
+log_trap_errors
+write_run_context
 
 require_env IMAGE_NAME IMAGE_VERSION TARGET
 OUT="build/${IMAGE_NAME}/output"

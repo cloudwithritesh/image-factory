@@ -9,3 +9,18 @@ roles:
     src: https://github.com/ansible-lockdown/UBUNTU24-CIS.git
     scm: git
     version: "1.8.0" # CIS Ubuntu 24.04 LTS Benchmark v1.0.0
+
+  - name: rhel9_cis
+    src: https://github.com/ansible-lockdown/RHEL9-CIS.git
+    scm: git
+    version: "2.4.2" # CIS RHEL 9 Benchmark v2.0.0 (RHEL, Rocky, Alma)
+
+  - name: amazon2023_cis
+    src: https://github.com/ansible-lockdown/AMAZON2023-CIS.git
+    scm: git
+    version: "1.5.0" # CIS Amazon Linux 2023 Benchmark
+
+  - name: windows2022_cis
+    src: https://github.com/ansible-lockdown/Windows-2022-CIS.git
+    scm: git
+    version: "4.2.0" # CIS Microsoft Windows Server 2022 Benchmark

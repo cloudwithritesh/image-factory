@@ -12,8 +12,8 @@ Operating guide: [instructions.md](instructions.md).
 flowchart TD
   A[Portal form<br/>Pages or Backstage] --> B[portal-request<br/>validate + branch + commit + PR]
   H[Hand-written change<br/>feat/… branch] --> C
-  B --> C[PR checks<br/>pr-standards, lint, plan]
-  C --> D{Review}
+  B --> C[PR checks, required, no approval needed<br/>pr-standards, lint, plan]
+  C --> D{Code-owner review<br/>merge disabled until approved}
   D -- changes needed --> H
   D -- approve + squash merge --> E[main]
   E --> F[image-factory<br/>build → scan → promote]
@@ -28,10 +28,10 @@ flowchart TD
 
 | Workflow | Triggers | Jobs | Cloud access | Concurrency |
 |---|---|---|---|---|
-| `portal-request.yml` | `issues: opened` (portal issues from owners/members/collaborators); `workflow_dispatch` (Backstage) | `request`: process → re-check → branch/commit/PR → reply on the issue | none | one group per submission |
-| `pr-standards.yml` | `pull_request` (opened, edited, synchronize, reopened) | `pr-standards`: branch, title, commit subjects; validate all requests and VMs | none | per PR (default) |
-| `image-factory.yml` | push to `main`; PRs; monthly schedule (`23 18 1 * *` UTC = 02:23 SGT on the 1st); `workflow_dispatch` (`image_request`, `rebuild_all`) | `lint` → `plan` → `build` (matrix: image × target) → `promote` (matrix, environments) | build/promote on `main` only | PRs: per branch, newer cancels older; `main`: one group per run (nothing dropped) |
-| `vm-provision.yml` | push to `main` touching `vms/**`; `workflow_dispatch` (`vm`) | `detect` → `apply` (matrix per VM) | yes | per VM |
+| `portal-request.yml` | `issues: opened` (portal issues from owners/members/collaborators); `workflow_dispatch` (Backstage) | `request`: process → re-check → branch/commit/PR → start PR checks (no App) → reply on the issue | none | one group per submission |
+| `pr-standards.yml` | `pull_request` (opened, edited, synchronize, reopened); `workflow_dispatch` (`pr`, started by portal-request) | `pr-standards`: branch, title, commit subjects; validate all requests and VMs | none | per PR, newer cancels older |
+| `image-factory.yml` | push to `main`; PRs; monthly schedule (`23 18 1 * *` UTC = 02:23 SGT on the 1st); `workflow_dispatch` (`image_request`, `rebuild_all`, `debug`) | `lint` → `plan` → `build` (matrix: image × target, Linux or Windows template) → `promote` (matrix, environments) | build/promote on `main` only | PRs: per branch, newer cancels older; `main`/dispatch: one group per run (nothing dropped) |
+| `vm-provision.yml` | push to `main` touching `vms/**`; `workflow_dispatch` (`vm`, `debug`) | `detect` → `apply` (matrix per VM) | yes | per VM |
 | `portal-pages.yml` | push to `main` touching catalogs, requests, VMs, portal or scripts; `workflow_dispatch` | `build` (render data) → `deploy` (GitHub Pages) | none | `pages` |
 | `branch-cleanup.yml` | `pull_request: closed` without merge, branch `portal/…` | delete the branch | none | |
 
@@ -62,7 +62,8 @@ sequenceDiagram
     RQ->>GH: branch portal/image/<name>-<date>-i<issue>
     RQ->>GH: commit feat|chore(image): … + trailers, PR "Closes #<issue>"
     RQ->>GH: comment "PR created: <link>"
-    GH->>CK: pr-standards (+ lint, plan with a GitHub App)
+    RQ->>CK: dispatch pr-standards + image-factory on the branch (no App)<br/>with an App: pull_request event
+    CK->>GH: check runs on the head commit (required)
     RV->>GH: review, approve, squash merge
     GH->>GH: delete branch, close issue
     GH->>IF: push to main (requests/<name>.yaml changed)
@@ -95,7 +96,7 @@ sequenceDiagram
   PL->>PL: pick changed requests, render vars, packer validate, matrix
   PL->>B: one job per image × target
   B->>AZ: OIDC login, ensure gallery image definition
-  B->>AZ: Packer VM: patch → software → CIS → SBOM → generalise
+  B->>AZ: Packer VM (packer/linux over SSH or packer/windows over WinRM):<br/>patch → software → hardening → SBOM → generalise (waagent / sysprep)
   AZ-->>B: gallery version (excluded from latest)
   B->>GR: (docker) push :candidate-<version>
   B->>B: Grype on SBOM, write pass marker
@@ -114,6 +115,7 @@ Which images build:
 | `workflow_dispatch` with `image_request` | the listed request file(s) |
 | `workflow_dispatch` with `rebuild_all`, or the monthly schedule | every request (patch rebuild) |
 | Pull request | none (lint + plan only) |
+| `workflow_dispatch` on a non-`main` branch (portal PR checks) | none (lint + plan of the PR's request only) |
 
 ### 3.4 Image version lifecycle
 
@@ -190,7 +192,7 @@ stateDiagram-v2
 | Issue (Pages) | `[portal] image: <name>` / `[portal] vm: <name>` |
 | Branch | `portal/image/<name>-<YYYYMMDD>-i<issue>` or `…-r<run>` |
 | Commit and PR title | `feat(image): add image <name>` · `chore(image): update image <name>` · `feat(vm): create vm <name> on <cloud>` · `chore(vm): update vm <name> on <cloud>` · `chore(vm): decommission vm <name>` |
-| Commit trailers | `Requested-by: @<user>`, `Request-source: pages\|backstage`, `Request-ref: issue #N \| workflow run N` |
+| Commit trailers | `Requested-by: @<user>`, `Request-source: pages\|backstage`, `Request-ref: i<issue> \| r<run>` (in the commit and at the end of the PR body, so the squash commit keeps them) |
 | Labels | `portal` + `image-request` or `vm-request` |
 | Merge | squash, PR title as the commit |
 | Image version | `YYYY.(MM*100+DD).<run>` |
@@ -209,10 +211,11 @@ Full rules: [standards.md](standards.md).
 | Untrusted issue author | Workflow job skipped; nothing created | (silent by design) |
 | `pr-standards` | PR check fails with the rule that was broken | PR author |
 | `lint` / `plan` | PR or `main` run fails; nothing is built | PR author / platform team |
-| Packer build | Build job fails; artifacts uploaded for diagnosis; no promotion | platform team |
+| Packer build | Build job fails; `triage.py` puts the likely cause in the run summary; logs uploaded (`output-*/logs/`); no promotion | platform team |
 | Vulnerability gate | Job fails; image stays a candidate (excluded from latest) | platform team |
 | Promotion | Skipped with a warning when the pass marker is missing | platform team |
-| VM apply | Job fails; state per VM, so other VMs are unaffected | platform team, requester (via the PR's merge commit) |
+| VM apply | Job fails with a triage summary; logs in `logs-vm-<name>`; state per VM, so other VMs are unaffected | platform team, requester (via the PR's merge commit) |
+| Windows image chosen for a VM | Portal hides it; the processor rejects it (Linux VMs only for now) | requester |
 | VM with an unapproved pinned version | Terraform postcondition error | requester |
 
 ---
@@ -225,3 +228,5 @@ Full rules: [standards.md](standards.md).
 | Rebuild one image | Run workflow → `image_request: requests/<name>.yaml` |
 | Re-apply one VM (drift, retry) | Actions → vm-provision → Run workflow → `vm: <name>` |
 | Refresh the portal | automatic on merge; or Actions → portal-pages → Run workflow |
+| Re-run with verbose logs | Run workflow → `debug: true` (image-factory, vm-provision), or re-run a job with "Enable debug logging"; see [logging.md](logging.md) |
+| Start PR checks by hand (portal PR, checks missing) | Actions → pr-standards → Run workflow on the PR branch with `pr: <number>`; Actions → image-factory → Run workflow on the PR branch |

@@ -1,0 +1,5 @@
+---
+# Shared settings for the openshift role. UID and WORKDIR must match
+# catalog/os.yaml (ubi9-openshift: user 1001, workdir /opt/app-root/src).
+openshift_uid: 1001
+openshift_app_root: /opt/app-root

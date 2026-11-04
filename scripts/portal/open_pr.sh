@@ -35,14 +35,24 @@ git commit --quiet --file "$msg_file"
 git push --quiet --set-upstream origin "$branch"
 
 label_args=()
-while read -r label; do label_args+=(--label "$label"); done < <(jq -r '.labels[]' "$RESULT")
+while read -r label; do label_args+=("$label"); done < <(jq -r '.labels[]' "$RESULT")
 
-pr_url="$(gh pr create --base main --head "$branch" --title "$title" --body-file "$body_file" "${label_args[@]}")"
+# REST, not `gh pr create`: GraphQL can be blocked by egress proxies.
+pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls" -f base=main -f head="$branch" -f title="$title" -F body=@"$body_file")"
+pr_url="$(jq -r .html_url <<< "$pr_json")"
+pr_number="$(jq -r .number <<< "$pr_json")"
+if [[ ${#label_args[@]} -gt 0 ]]; then
+  labels_json="$(jq -c '{labels: .labels}' "$RESULT")"
+  gh api "repos/${GITHUB_REPOSITORY}/issues/${pr_number}/labels" --input - <<< "$labels_json" > /dev/null
+fi
 echo "$pr_url"
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "pr_url=${pr_url}"
+    echo "pr_number=${pr_number}"
     echo "branch=${branch}"
     echo "sha=$(git rev-parse HEAD)"
+    echo "path=${path}"
+    echo "kind=$(jqr .kind)"
   } >> "$GITHUB_OUTPUT"
 fi

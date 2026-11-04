@@ -1,0 +1,5 @@
+---
+# Profile openshift: container baseline + OpenShift conventions.
+baseline_ssh: false
+baseline_sysctl: false
+baseline_strip_setuid: true

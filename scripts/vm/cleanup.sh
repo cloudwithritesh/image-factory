@@ -5,12 +5,29 @@
 set -euo pipefail
 
 : "${PACKER_SOURCE_TYPE:?PACKER_SOURCE_TYPE is required}"
-export DEBIAN_FRONTEND=noninteractive
+PKG_FAMILY="${PKG_FAMILY:-debian}"
 
-echo ">> package caches"
-apt-get -y autoremove --purge
-apt-get -y clean
-rm -rf /var/lib/apt/lists/*
+echo ">> package caches (${PKG_FAMILY})"
+case "$PKG_FAMILY" in
+  debian)
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get -y autoremove --purge
+    apt-get -y clean
+    rm -rf /var/lib/apt/lists/*
+    ;;
+  redhat)
+    dnf -y autoremove || true
+    dnf -y clean all
+    rm -rf /var/cache/dnf
+    # RHEL PAYG images register with the cloud's RHUI at boot; nothing to unregister.
+    ;;
+  suse)
+    zypper --non-interactive clean --all
+    # PAYG instances re-register with the SUSE public cloud update
+    # infrastructure on first boot; drop the build VM's registration.
+    if command -v registercloudguest > /dev/null 2>&1; then registercloudguest --clean || true; fi
+    ;;
+esac
 
 echo ">> SBOM working files"
 rm -rf /tmp/sbom
@@ -29,7 +46,7 @@ ln -s /etc/machine-id /var/lib/dbus/machine-id
 rm -f /etc/ssh/ssh_host_*
 
 echo ">> cloud-init state"
-cloud-init clean --logs --seed
+if command -v cloud-init > /dev/null 2>&1; then cloud-init clean --logs --seed; fi
 
 case "$PACKER_SOURCE_TYPE" in
   amazon-ebs)
@@ -38,7 +55,8 @@ case "$PACKER_SOURCE_TYPE" in
     ;;
   azure-arm)
     sync
-    /usr/sbin/waagent -force -deprovision+user
+    waagent_bin="$(command -v waagent || echo /usr/sbin/waagent)"
+    "$waagent_bin" -force -deprovision+user
     export HISTSIZE=0
     ;;
 esac

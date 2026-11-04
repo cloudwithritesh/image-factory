@@ -3,8 +3,10 @@
 # limited to the targets each request asks for.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+export FACTORY_LOG_COMPONENT=packer-validate
 # shellcheck source=scripts/ci/lib.sh
 source scripts/ci/lib.sh
+log_trap_errors
 
 PLAN=build/plan.json
 [[ -f "$PLAN" ]] || die "$PLAN not found; run scripts/imagefactory.py plan first"
@@ -28,18 +30,23 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   log "CI variables not set (${missing[*]}); validating with placeholders"
 fi
 
-packer init packer/linux
+# Every template is always syntax-checked, whatever the plan contains
+for template in packer/*/; do
+  template="${template%/}"
+  run_step "packer init ${template}" packer init "$template"
+  run_step "packer validate -syntax-only ${template}" packer validate -syntax-only "$template"
+done
 
 count="$(jq 'length' "$PLAN")"
 if [[ "$count" -eq 0 ]]; then
-  log "No requests selected; validating the template syntax only"
-  packer validate -syntax-only packer/linux
+  log_info "no requests selected; templates syntax-checked only"
   exit 0
 fi
 
 for name in $(jq -r '.[].name' "$PLAN"); do
+  family="$(jq -r --arg n "$name" '.[] | select(.name == $n) | .family // "linux"' "$PLAN")"
   only="$(jq -r --arg n "$name" '.[] | select(.name == $n) | .targets[]' "$PLAN" \
-    | while read -r t; do printf 'linux.%s,' "$(source_for_target "$t")"; done)"
-  log "packer validate: $name (${only%,})"
-  packer validate -only="${only%,}" -var-file="build/${name}/variables.pkrvars.json" packer/linux
+    | while read -r t; do printf '%s.%s,' "$family" "$(source_for_target "$t" "$family")"; done)"
+  run_step "packer validate ${name} (${only%,})" \
+    packer validate -only="${only%,}" -var-file="build/${name}/variables.pkrvars.json" "packer/${family}"
 done

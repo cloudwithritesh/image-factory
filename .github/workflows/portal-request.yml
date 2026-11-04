@@ -13,9 +13,11 @@
 #
 # Token: a GitHub App (vars.PORTAL_APP_ID + secrets.PORTAL_APP_PRIVATE_KEY)
 # is recommended. Its PRs trigger the normal PR checks and its commits show
-# as <app>[bot]. Without it, GITHUB_TOKEN is used, and this job records the
-# pr-standards check itself, because GitHub doesn't run workflows for PRs
-# created with GITHUB_TOKEN.
+# as <app>[bot]. Without it, GITHUB_TOKEN is used: GitHub won't run
+# pull_request workflows for those PRs without a manual "Approve and run",
+# so this job starts the required checks (pr-standards, lint, plan) itself
+# with workflow_dispatch on the PR branch. They report on the PR's head
+# commit like normal PR checks.
 # =============================================================================
 name: portal-request
 
@@ -61,10 +63,13 @@ jobs:
        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
     runs-on: ubuntu-latest
     permissions:
+      actions: write # start the PR checks (workflow_dispatch) when there's no App
       contents: write
       pull-requests: write
       issues: write
-      statuses: write
+    env:
+      FACTORY_LOG_LEVEL: ${{ vars.FACTORY_LOG_LEVEL || 'info' }}
+      FACTORY_LOG_DIR: ${{ github.workspace }}/build/logs
     steps:
       - name: Bot token (GitHub App)
         id: app
@@ -88,7 +93,12 @@ jobs:
 
       - name: Process request
         id: process
-        run: python3 scripts/portal/process_request.py --event "$GITHUB_EVENT_PATH" --out "$RUNNER_TEMP/result.json"
+        run: |
+          rc=0
+          python3 scripts/portal/process_request.py --event "$GITHUB_EVENT_PATH" --out "$RUNNER_TEMP/result.json" || rc=$?
+          # Correlate the rest of this job's logs with the request (i<issue> / r<run>)
+          echo "REQUEST_REF=$(jq -r '.ref // empty' "$RUNNER_TEMP/result.json" 2> /dev/null)" >> "$GITHUB_ENV"
+          exit "$rc"
 
       - name: Re-check standards and catalogs
         run: |
@@ -121,16 +131,15 @@ jobs:
           GIT_AUTHOR_EMAIL: ${{ steps.who.outputs.email }}
         run: scripts/portal/open_pr.sh "$RUNNER_TEMP/result.json"
 
-      - name: Record checks (no GitHub App)
+      - name: Start the PR checks (no GitHub App)
         if: vars.PORTAL_APP_ID == ''
         env:
           GH_TOKEN: ${{ github.token }}
-          SHA: ${{ steps.pr.outputs.sha }}
-        run: |
-          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" \
-            -f state=success -f context=pr-standards \
-            -f description="Naming standards and catalog validation passed (portal-request)" \
-            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /dev/null
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
+          REQUEST_PATH: ${{ steps.pr.outputs.path }}
+          KIND: ${{ steps.pr.outputs.kind }}
+        run: scripts/portal/start_pr_checks.sh
 
       - name: Reply on the issue
         if: always() && github.event_name == 'issues'
@@ -153,6 +162,14 @@ jobs:
             gh issue comment "$ISSUE" --body-file "$RUNNER_TEMP/comment.md"
             gh issue close "$ISSUE" --reason "not planned"
           fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-portal-request-${{ github.run_id }}
+          path: build/logs/
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Summary
         if: always()

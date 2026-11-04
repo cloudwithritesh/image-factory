@@ -10,8 +10,15 @@
 #   artifact store   GitHub: a release per image version
 #                    GitLab: the generic package registry
 
-log() { printf '\033[1;34m>> %s\033[0m\n' "$*"; }
-die() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
+# Structured logging (log_info, log_warn, log_error, run_step, ...)
+# shellcheck source=scripts/ci/log.sh
+source "$(dirname "${BASH_SOURCE[0]}")/log.sh"
+
+log() { log_info "$@"; }
+die() {
+  log_error "$1" event=fatal
+  exit 1
+}
 
 require_env() {
   local name
@@ -35,14 +42,25 @@ registry_env() {
   require_env REGISTRY REGISTRY_USER REGISTRY_PASSWORD
 }
 
-# Packer source name for a target
+# Packer source name for a target. The build block and the sources are
+# named after the OS family (packer/linux, packer/windows).
+#   source_for_target <target> [family]   -> e.g. azure-arm.windows
 source_for_target() {
+  local family="${2:-linux}"
   case "$1" in
-    aws)    echo "amazon-ebs.linux" ;;
-    azure)  echo "azure-arm.linux" ;;
-    docker) echo "docker.linux" ;;
+    aws)    echo "amazon-ebs.${family}" ;;
+    azure)  echo "azure-arm.${family}" ;;
+    docker)
+      [[ "$family" == "linux" ]] || die "docker images are Linux only (family ${family})"
+      echo "docker.${family}"
+      ;;
     *) die "unknown target: $1" ;;
   esac
+}
+
+# OS family of a rendered request (build/<image>/plan.json): linux | windows
+image_family() {
+  jq -r '.family // "linux"' "build/${1:?image name}/plan.json"
 }
 
 # AWS credentials. On GitLab, exchange the ID token (the SDKs in Packer and

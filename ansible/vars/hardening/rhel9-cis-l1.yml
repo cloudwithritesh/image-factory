@@ -1,0 +1,4 @@
+---
+# Profile cis-l1: Level 1 Server (Level 2 tasks skipped by tag).
+rhel9cis_level_1: true
+rhel9cis_level_2: false

@@ -1,0 +1,118 @@
+---
+# Windows golden-image provisioning, run by Packer over WinRM.
+#
+# Inputs (extra vars):
+#   @build/<image>/ansible-vm.json   written by scripts/imagefactory.py
+#   packer_source_type               amazon-ebs | azure-arm
+#
+# Order matches ansible/image.yml: patch -> software -> harden -> build info.
+- name: Build Windows golden image
+  hosts: all
+  gather_facts: true
+
+  vars:
+    image_target: "{{ {'amazon-ebs': 'aws', 'azure-arm': 'azure'}[packer_source_type] }}"
+    hardening_vars_dir: "{{ playbook_dir }}/vars/hardening"
+    selected_software: "{{ software_items | selectattr('targets', 'contains', image_target) | list }}"
+
+  pre_tasks:
+    - name: Check required inputs
+      ansible.builtin.assert:
+        that:
+          - image_name is defined
+          - image_version is defined
+          - image_kind == 'vm'
+          - pkg_family == 'windows'
+          - packer_source_type in ['amazon-ebs', 'azure-arm']
+          - software_items is defined
+          - hardening_role is defined
+        fail_msg: Missing inputs. Run Packer with the vars file rendered by scripts/imagefactory.py.
+
+    - name: Load Windows settings
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/windows.yml"
+
+  tasks:
+    # ---- Patch ---------------------------------------------------------------------
+    - name: Install Windows updates (reboots as needed)
+      ansible.windows.win_updates:
+        category_names: "{{ factory_win_update_categories }}"
+        reboot: true
+        reboot_timeout: 3600
+      register: win_updates_result
+
+    - name: Report updates
+      ansible.builtin.debug:
+        msg: >-
+          Installed {{ win_updates_result.installed_update_count | default(0) }} update(s);
+          failed {{ win_updates_result.failed_update_count | default(0) }}
+
+    # ---- Software --------------------------------------------------------------------
+    - name: Install Chocolatey packages
+      when: selected_software | selectattr('type', 'equalto', 'choco') | list | length > 0
+      chocolatey.chocolatey.win_chocolatey:
+        name: "{{ selected_software | selectattr('type', 'equalto', 'choco') | map(attribute='packages') | flatten | unique }}"
+        state: present
+        source: "{{ factory_choco_source }}"
+
+    - name: Create the image factory folder
+      ansible.windows.win_file:
+        path: C:\ProgramData\image-factory
+        state: directory
+
+    - name: Copy files from the repository
+      ansible.windows.win_copy:
+        src: "{{ playbook_dir }}/files/{{ item.src }}"
+        dest: "{{ (item.dest_by_family | default({})).windows | default(item.dest) }}"
+      loop: "{{ selected_software | selectattr('type', 'equalto', 'file') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Trust copied CA certificates (LocalMachine\Root)
+      ansible.windows.win_certificate_store:
+        path: "{{ (item.dest_by_family | default({})).windows | default(item.dest) }}"
+        store_name: Root
+        store_location: LocalMachine
+        state: present
+      loop: >-
+        {{ selected_software | selectattr('type', 'equalto', 'file') | selectattr('notify', 'defined')
+           | selectattr('notify', 'equalto', 'update-ca-certificates') | list }}
+      loop_control:
+        label: "{{ item.key }}"
+
+    # ---- Harden ------------------------------------------------------------------------
+    - name: Hardening
+      when: hardening_role != 'none'
+      block:
+        - name: Load common settings for the hardening role
+          ansible.builtin.include_vars:
+            file: "{{ hardening_vars_dir }}/{{ hardening_role }}.common.yml"
+
+        - name: Load settings for profile {{ hardening_profile }}
+          ansible.builtin.include_vars:
+            file: "{{ hardening_vars_dir }}/{{ hardening_vars_file }}"
+
+        - name: Apply hardening profile {{ hardening_profile }}
+          ansible.builtin.include_role:
+            name: "{{ hardening_role }}"
+
+    # ---- Build information -----------------------------------------------------------------
+    - name: List installed OS updates (for the build record)
+      ansible.windows.win_shell: Get-HotFix | Select-Object -ExpandProperty HotFixID | ConvertTo-Json -Compress
+      register: win_hotfixes
+      changed_when: false
+
+    - name: Record build information inside the image
+      ansible.windows.win_copy:
+        dest: C:\ProgramData\image-factory\build-info.json
+        content: "{{ build_info | to_nice_json }}"
+      vars:
+        build_info:
+          image_name: "{{ image_name }}"
+          image_version: "{{ image_version }}"
+          os: "{{ os_key }}"
+          target: "{{ image_target }}"
+          hardening_profile: "{{ hardening_profile }}"
+          software: "{{ selected_software | map(attribute='key') | list }}"
+          hotfixes: "{{ win_hotfixes.stdout | from_json }}"
+          built_at: "{{ now(utc=true).isoformat() }}"

@@ -49,7 +49,7 @@ and carry trailers that record who asked and where from:
 ```
 Requested-by: @cloudwithritesh
 Request-source: pages            # pages | backstage | cli
-Request-ref: issue #42           # or: workflow run <id>
+Request-ref: i42                  # or: r<last 8 digits of the run id>
 ```
 
 ## Commit identity
@@ -63,7 +63,20 @@ Request-ref: issue #42           # or: workflow run <id>
 
 - **Squash merge only.** The squash commit uses the PR title, so `main`'s
   history is one conventional commit per PR.
-- At least **one approval**. Portal PRs are authored by the bot, so the
-  requester can approve unless CODEOWNERS says otherwise.
-- Required check: `pr-standards`. On non-portal PRs, `lint` and `plan` from
-  the image-factory workflow run too.
+- At least **one approving review from a code owner**, and nobody can
+  bypass it, admins included: the **Squash and merge** button stays
+  disabled until the PR is approved and the required checks pass.
+  - Portal PRs are authored by the bot, so a code owner approves them.
+  - GitHub never lets authors approve their own PR, so a PR you open
+    yourself needs another reviewer. Add a second code owner in
+    `.github/CODEOWNERS`. (Emergency only:
+    `ALLOW_ADMIN_BYPASS=true scripts/bootstrap/configure-github-repo.sh`
+    restores admin bypass; re-run without it afterwards.)
+- **Required checks: `pr-standards`, `lint`, `plan`**, on every PR. They
+  start automatically, without "Approve and run":
+  - people's PRs run them on `pull_request`;
+  - portal PRs opened with `GITHUB_TOKEN` get them via `workflow_dispatch`
+    on the PR branch (`scripts/portal/start_pr_checks.sh`); with the
+    GitHub App they run on `pull_request` like any other PR;
+  - forks only need approval for first-time contributors who are new to
+    GitHub.

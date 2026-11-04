@@ -4,19 +4,26 @@
 # a container image.
 - name: Select the software for target {{ image_target }}
   ansible.builtin.set_fact:
-    software_apt: "{{ selected | selectattr('type', 'equalto', 'apt') | list }}"
+    # "apt" is the older name of "package"
+    software_pkg: "{{ selected | selectattr('type', 'in', ['package', 'apt']) | list }}"
     software_url: "{{ selected | selectattr('type', 'equalto', 'url') | list }}"
     software_file: "{{ selected | selectattr('type', 'equalto', 'file') | list }}"
   vars:
     selected: "{{ software_items | selectattr('targets', 'contains', image_target) | list }}"
 
-# ---- apt ---------------------------------------------------------------------
+# ---- package (apt / dnf / zypper) ---------------------------------------------------
+- name: Collect package names for {{ pkg_family }}
+  ansible.builtin.set_fact:
+    software_pkg_names: "{{ (software_pkg_names | default([])) + ((item.packages_by_family | default({}))[pkg_family] | default(item.packages)) }}"
+  loop: "{{ software_pkg }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Install packages
-  when: software_apt | length > 0
-  ansible.builtin.apt:
-    name: "{{ software_apt | map(attribute='packages') | flatten | unique }}"
+  when: software_pkg_names | default([]) | length > 0
+  ansible.builtin.package:
+    name: "{{ software_pkg_names | unique }}"
     state: present
-    install_recommends: false
   environment:
     DEBIAN_FRONTEND: noninteractive
 
@@ -74,7 +81,7 @@
 - name: Copy files from the repository
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/files/{{ item.src }}"
-    dest: "{{ item.dest }}"
+    dest: "{{ (item.dest_by_family | default({}))[pkg_family] | default(item.dest) }}"
     mode: "{{ item.mode | default('0644') }}"
     owner: root
     group: root
@@ -91,5 +98,5 @@
     | selectattr('notify', 'defined')
     | selectattr('notify', 'equalto', 'update-ca-certificates')
     | list | length > 0
-  ansible.builtin.command: update-ca-certificates
+  ansible.builtin.command: "{{ 'update-ca-trust extract' if pkg_family == 'redhat' else 'update-ca-certificates' }}"
   changed_when: true

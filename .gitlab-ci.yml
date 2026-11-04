@@ -81,7 +81,7 @@ lint:packer:
     key: packer-plugins-v1
     paths: [.packer.d/plugins]
   script:
-    - packer init packer/linux
+    - for t in packer/*/; do packer init "$t"; done
     - packer fmt -check -diff -recursive packer/
 
 lint:ansible:
@@ -89,7 +89,8 @@ lint:ansible:
   script:
     - ansible-galaxy role install -r ansible/requirements.yml -p ansible/.galaxy/roles
     - cd ansible && ansible-playbook image.yml --syntax-check -i localhost,
-    - ansible-lint --offline image.yml roles/
+    - ansible-playbook windows.yml --syntax-check -i localhost,
+    - ansible-lint --offline image.yml windows.yml roles/
   allow_failure:
     exit_codes: [2] # lint findings warn; syntax errors (exit 4) fail
 
@@ -101,7 +102,7 @@ lint:yaml:
 lint:shell:
   stage: validate
   script:
-    - shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/container/*.sh scripts/bootstrap/*.sh scripts/portal/*.sh
+    - shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/linux/*.sh scripts/container/*.sh scripts/bootstrap/*.sh scripts/portal/*.sh
 
 lint:portal:
   stage: validate

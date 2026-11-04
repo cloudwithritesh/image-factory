@@ -1,0 +1,5 @@
+---
+# Profile baseline (VMs): SSH, kernel parameters, file systems, banner.
+baseline_ssh: true
+baseline_sysctl: true
+baseline_strip_setuid: false

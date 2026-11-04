@@ -31,6 +31,11 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from factorylog import fields, get_logger  # noqa: E402
+
+log = get_logger("imagefactory")
+
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG_DIR = ROOT / "catalog"
 REQUESTS_DIR = ROOT / "requests"
@@ -40,9 +45,19 @@ HARDENING_VARS_DIR = ROOT / "ansible" / "vars" / "hardening"
 
 VM_TARGETS = {"aws", "azure"}
 CONTAINER_TARGETS = {"docker"}
+PKG_FAMILIES = {"debian", "redhat", "suse", "windows"}
+# Software item types each package family can install
+SOFTWARE_TYPES = {
+    "debian": {"package", "apt", "url", "file"},
+    "redhat": {"package", "url", "file"},
+    "suse": {"package", "url", "file"},
+    "windows": {"choco", "file"},
+}
 
 DEFAULTS = {
     "aws": {"instance_type": "t3.medium", "root_volume_gb": 20, "copy_regions": []},
+    # Windows needs a bigger disk and more memory for Windows Update
+    "aws_windows": {"instance_type": "t3.large", "root_volume_gb": 64, "copy_regions": []},
     "azure": {"vm_size": "Standard_D2s_v5", "replication_regions": []},
     "scan": {"fail_on_severity": "critical", "only_fixed": True},
     "promotion": "auto",
@@ -155,6 +170,10 @@ def validate_request(req: dict, catalogs: dict, source: str = "") -> list[str]:
     if not os_entry:
         return [f"spec/os: '{os_key}' is not in catalog/os.yaml (known: {sorted(catalogs['os'])})"]
 
+    family, pkg_family = os_entry.get("family"), os_entry.get("pkg_family")
+    if family not in {"linux", "windows"} or pkg_family not in PKG_FAMILIES:
+        return [f"catalog: {os_key} needs family (linux|windows) and pkg_family ({'|'.join(sorted(PKG_FAMILIES))})"]
+
     targets = set(spec["targets"])
     unsupported = targets - set(os_entry.get("targets", {}))
     if unsupported:
@@ -194,6 +213,8 @@ def validate_request(req: dict, catalogs: dict, source: str = "") -> list[str]:
             errors.append(f"spec/software: '{key}' is not approved for {os_key}")
         if not targets & set(item.get("targets", [])):
             errors.append(f"spec/software: '{key}' supports none of the requested targets {sorted(targets)}")
+        if item.get("type") not in SOFTWARE_TYPES[pkg_family]:
+            errors.append(f"spec/software: '{key}' is a {item.get('type')} item, which {os_key} can't install")
         if item.get("type") == "file" and not (ANSIBLE_FILES_DIR / item["src"]).is_file():
             errors.append(f"spec/software: '{key}' needs ansible/files/{item['src']}, which isn't in the repo")
 
@@ -226,8 +247,8 @@ def image_version() -> str:
     return f"{now.year}.{now.month * 100 + now.day}.{iid}"
 
 
-def merged(spec: dict, section: str) -> Any:
-    default = DEFAULTS[section]
+def merged(spec: dict, section: str, default_key: str | None = None) -> Any:
+    default = DEFAULTS[default_key or section]
     if isinstance(default, dict):
         return {**default, **(spec.get(section) or {})}
     return spec.get(section, default)
@@ -247,7 +268,9 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
     out = out_root / name
     out.mkdir(parents=True, exist_ok=True)
 
-    aws, azure, scan = merged(spec, "aws"), merged(spec, "azure"), merged(spec, "scan")
+    family, pkg_family = os_entry["family"], os_entry["pkg_family"]
+    aws = merged(spec, "aws", "aws_windows" if family == "windows" else "aws")
+    azure, scan = merged(spec, "azure"), merged(spec, "scan")
     software_items = [{"key": k, **catalogs["software"][k]} for k in spec.get("software", [])]
     env = ci_env()
     registry_image = env["registry_image"] or "registry.example.com/image-factory"
@@ -258,6 +281,8 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
         "image_owner": meta["owner"],
         "image_description": meta.get("description", f"{os_entry['display_name']} golden image"),
         "os_key": os_key,
+        "pkg_family": pkg_family,
+        "ansible_python_interpreter": os_entry.get("ansible_python", ""),
         "request_labels": meta.get("labels", {}),
         "git_sha": env["sha"],
         "pipeline_url": env["run_url"],
@@ -272,6 +297,8 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
             "image_name": name,
             "image_version": version,
             "os_key": os_key,
+            "os_family": family,
+            "pkg_family": pkg_family,
             "image_kind": kind,
             "software_items": software_items,
             "hardening_profile": profile_name,
@@ -288,11 +315,12 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
         pkrvars |= {
             "aws_source_ami_filter_name": t["source_ami_filter_name"],
             "aws_source_ami_owners": t["source_ami_owners"],
-            "aws_ssh_username": t["ssh_username"],
             "aws_instance_type": aws["instance_type"],
             "aws_root_volume_gb": aws["root_volume_gb"],
             "aws_ami_copy_regions": aws["copy_regions"],
         }
+        if family == "linux":
+            pkrvars["aws_ssh_username"] = t["ssh_username"]
     if "azure" in targets:
         t = os_entry["targets"]["azure"]
         pkrvars |= {
@@ -302,7 +330,7 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
             # One gallery image definition per image request (see packer-build.sh)
             "azure_gallery_image_definition": name,
             "azure_hyper_v_generation": t.get("hyper_v_generation", "V2"),
-            "azure_os_type": "Windows" if os_entry["family"] == "windows" else "Linux",
+            "azure_os_type": "Windows" if family == "windows" else "Linux",
             "azure_vm_size": azure["vm_size"],
             "azure_replication_regions": azure["replication_regions"],
         }
@@ -312,6 +340,8 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
             "docker_base_image": t["base_image"],
             "docker_repository": f"{registry_image}/images/{name}",
             "docker_source_url": env["project_url"],
+            "docker_user": str(t.get("user", "")),
+            "docker_workdir": t.get("workdir", ""),
         }
 
     (out / "variables.pkrvars.json").write_text(json.dumps(pkrvars, indent=2) + "\n", encoding="utf-8")
@@ -320,7 +350,11 @@ def render(req: dict, catalogs: dict, out_root: Path, version: str) -> dict:
         "name": name,
         "version": version,
         "os": os_key,
-        "family": os_entry["family"],
+        "family": family,
+        "pkg_family": pkg_family,
+        "status": os_entry.get("status", "ga"),
+        # Packer template folder; its build block is named after the family
+        "packer_template": f"packer/{family}",
         "targets": targets,
         "fail_on_severity": scan["fail_on_severity"],
         "only_fixed": bool(scan["only_fixed"]),
@@ -420,6 +454,7 @@ def github_matrix(plans: list[dict]) -> list[dict]:
             "name": p["name"],
             "version": p["version"],
             "target": target,
+            "family": p["family"],
             "fail_on_severity": p["fail_on_severity"],
             "only_fixed": str(p["only_fixed"]).lower(),
             # Approvals are GitHub environment protection rules. Manual
@@ -442,6 +477,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         except RequestError as exc:
             failed += 1
             print(f"INVALID {exc}", file=sys.stderr)
+            log.debug("request failed validation", extra=fields(event="validate_invalid", request=ref))
     return 1 if failed else 0
 
 
@@ -463,6 +499,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     out_root.mkdir(parents=True, exist_ok=True)
     refs, reason = select_requests()
     print(f"Selecting requests by: {reason}")
+    log.info("selecting requests", extra=fields(event="plan_select", reason=reason, requests=",".join(refs) or "none"))
     version = image_version()
     plans, errors = [], []
     for ref in refs:
@@ -470,8 +507,12 @@ def cmd_plan(args: argparse.Namespace) -> int:
             _, req = load_valid_request(ref, catalogs)
             plans.append(render(req, catalogs, out_root, version))
             print(f"  + {req['metadata']['name']} {version} -> {', '.join(req['spec']['targets'])}")
+            log.info("planned image", extra=fields(
+                event="plan_image", image=req["metadata"]["name"], version=version, os=req["spec"]["os"],
+                targets=",".join(req["spec"]["targets"]), requested_by=req["metadata"].get("requested_by", "")))
         except RequestError as exc:
             errors.append(str(exc))
+            log.error("invalid request", extra=fields(event="plan_invalid", request=ref, error=str(exc).splitlines()[0]))
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1

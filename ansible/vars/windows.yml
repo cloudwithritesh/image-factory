@@ -1,0 +1,12 @@
+---
+# Windows build settings (ansible/windows.yml).
+# Point this at your internal Chocolatey feed (Nexus, Artifactory, ProGet)
+# in production; the community feed is rate-limited and not curated.
+factory_choco_source: https://community.chocolatey.org/api/v2/
+# Windows Update categories applied to every image
+factory_win_update_categories:
+  - Critical Updates
+  - Security Updates
+  - Update Rollups
+  - Updates
+  - Definition Updates

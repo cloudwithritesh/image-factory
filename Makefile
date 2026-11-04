@@ -25,18 +25,20 @@ packer-validate:
 	IMAGE_REQUEST=$(REQUEST) python3 scripts/imagefactory.py plan --out build
 	scripts/ci/packer-validate.sh
 
+# Family (linux | windows) comes from the rendered plan
 build: render
-	packer init packer/linux
-	packer build -only=linux.$(if $(filter aws,$(TARGET)),amazon-ebs,$(if $(filter azure,$(TARGET)),azure-arm,docker)).linux \
-	  -var-file=build/$(NAME)/variables.pkrvars.json packer/linux
+	$(eval FAMILY := $(shell jq -r .family build/$(NAME)/plan.json))
+	packer init packer/$(FAMILY)
+	packer build -only=$(FAMILY).$(if $(filter aws,$(TARGET)),amazon-ebs,$(if $(filter azure,$(TARGET)),azure-arm,docker)).$(FAMILY) \
+	  -var-file=build/$(NAME)/variables.pkrvars.json packer/$(FAMILY)
 
 lint: validate
 	yamllint -c .yamllint.yml .
-	shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/container/*.sh scripts/bootstrap/*.sh
+	shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/linux/*.sh scripts/container/*.sh scripts/bootstrap/*.sh scripts/portal/*.sh
 	packer fmt -check -recursive packer/
 	terraform fmt -check -recursive terraform/
 	ansible-galaxy role install -r ansible/requirements.yml -p ansible/.galaxy/roles
-	cd ansible && ansible-playbook image.yml --syntax-check -i localhost,
+	cd ansible && ansible-playbook image.yml --syntax-check -i localhost, && ansible-playbook windows.yml --syntax-check -i localhost,
 
 fmt:
 	packer fmt -recursive packer/

@@ -37,6 +37,9 @@ sys.path.insert(0, str(HERE))  # scripts/portal/
 
 import imagefactory as ifc  # noqa: E402
 import standards  # noqa: E402
+from factorylog import fields, get_logger  # noqa: E402
+
+log = get_logger("portal-request")
 
 VM_DIR = ROOT / "vms"
 VM_SCHEMA = ROOT / "schemas" / "vm-request.schema.json"
@@ -258,6 +261,13 @@ def approved_images() -> dict[str, list[str]]:
     return images
 
 
+def image_os_family(name: str) -> str:
+    """linux | windows for an image request (unknown -> linux)."""
+    data = load_yaml_file(ifc.REQUESTS_DIR / f"{name}.yaml") or {}
+    os_key = (data.get("spec") or {}).get("os", "")
+    return (ifc.load_catalogs()["os"].get(os_key) or {}).get("family", "linux")
+
+
 def build_vm_request(form: dict, requested_by: str, existing: dict | None) -> dict:
     catalog = yaml.safe_load(VM_CATALOG.read_text(encoding="utf-8"))
     name = text(form, "name")
@@ -326,6 +336,10 @@ def validate_vm(doc: dict, path: Path) -> None:
             errors.append(f"image '{spec['image']}' isn't an approved image (choose from {sorted(images)})")
         elif spec["cloud"] not in images[spec["image"]]:
             errors.append(f"image '{spec['image']}' isn't built for {spec['cloud']}")
+        elif image_os_family(spec["image"]) != "linux":
+            # terraform/vm/azure creates Linux VMs (SSH keys). Windows VMs need
+            # a password/credential flow first; see docs/architecture.md.
+            errors.append(f"image '{spec['image']}' is a Windows image; self-service VMs are Linux only for now")
         lo, hi = catalog["os_disk_gb"]["min"], catalog["os_disk_gb"]["max"]
         if not lo <= spec.get("os_disk_gb", lo) <= hi:
             errors.append(f"os_disk_gb must be between {lo} and {hi}")
@@ -411,6 +425,11 @@ def pr_body(kind: str, action: str, name: str, rel_path: str, content: str, sub:
     ]
     if sub.get("issue_number"):
         lines += ["", f"Closes #{sub['issue_number']}"]
+    # Squash merges use the PR body as the commit message, so the trailers
+    # go last: build and VM jobs read Request-ref from main's commit to link
+    # their logs back to the portal request (docs/logging.md).
+    lines += ["", f"Requested-by: @{sub['requested_by']}", f"Request-source: {sub['source']}",
+              f"Request-ref: {sub['ref']}"]
     return "\n".join(lines) + "\n"
 
 
@@ -473,7 +492,7 @@ def process(sub: dict) -> dict:
     trailers = [
         f"Requested-by: @{sub['requested_by']}",
         f"Request-source: {sub['source']}",
-        f"Request-ref: {sub['ref_text']}",
+        f"Request-ref: {sub['ref']}",
     ]
     commit_message = f"{title}\n\nPortal request for {rel}.\n\n" + "\n".join(trailers) + "\n"
     return {
@@ -489,6 +508,7 @@ def process(sub: dict) -> dict:
         "requested_by": sub["requested_by"],
         "source": sub["source"],
         "issue_number": sub.get("issue_number"),
+        "ref": sub["ref"],
     }
 
 
@@ -498,11 +518,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args(argv)
     try:
-        result = process(read_submission(args.event))
+        sub = read_submission(args.event)
+        log.info("request received", extra=fields(
+            event="request_received", kind=sub.get("kind"), source=sub.get("source"),
+            requested_by=sub.get("requested_by"), ref=sub.get("ref")))
+        result = process(sub)
         result["ok"] = True
+        log.info("request accepted", extra=fields(
+            event="request_accepted", kind=result["kind"], name=result["name"], action=result["action"],
+            branch=result["branch"], requested_by=result["requested_by"]))
     except RequestError as exc:
         result = {"ok": False, "error": str(exc)}
+        log.warning("request rejected", extra=fields(event="request_rejected", error=str(exc).splitlines()[0]))
     except Exception as exc:  # noqa: BLE001 - always leave a result for the issue reply
+        log.exception("internal error while processing the request", extra=fields(event="request_error"))
         result = {"ok": False, "error": f"internal error ({type(exc).__name__}: {exc}); the platform team has been notified via the failed run"}
     if not result["ok"]:
         try:  # still report the issue number so the workflow can comment

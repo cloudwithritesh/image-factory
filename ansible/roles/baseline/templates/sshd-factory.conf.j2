@@ -1,0 +1,4 @@
+# Managed by the image factory baseline role ({{ hardening_profile }})
+{% for k, v in baseline_ssh_settings.items() %}
+{{ k }} {{ v }}
+{% endfor %}
