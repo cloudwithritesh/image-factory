@@ -2,8 +2,8 @@ output "gallery_id" {
   value = azurerm_shared_image_gallery.this.id
 }
 
-output "image_definitions" {
-  value = { for k, v in azurerm_shared_image.os : k => v.id }
+output "vm_subnet_id" {
+  value = azurerm_subnet.workloads.id
 }
 
 output "ci_variables" {
@@ -16,5 +16,7 @@ output "ci_variables" {
     PKR_VAR_azure_gallery_resource_group = azurerm_resource_group.gallery.name
     PKR_VAR_azure_gallery_name           = azurerm_shared_image_gallery.this.name
     PKR_VAR_azure_gallery_location       = azurerm_shared_image_gallery.this.location
+    VM_RESOURCE_GROUP                    = azurerm_resource_group.vms.name
+    VM_SUBNET_ID                         = azurerm_subnet.workloads.id
   }
 }

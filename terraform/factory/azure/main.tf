@@ -35,18 +35,6 @@ data "azurerm_client_config" "current" {}
 
 locals {
   tags = merge(var.tags, { ManagedBy = "terraform", Component = "image-factory" })
-
-  # One gallery image definition per OS that has an Azure target, read from
-  # the same catalog the request validator uses.
-  os_catalog = yamldecode(file("${path.module}/../../../catalog/os.yaml"))
-  azure_images = {
-    for key, os in local.os_catalog : os.targets.azure.gallery_image_definition => {
-      os_key     = key
-      os_type    = os.family == "windows" ? "Windows" : "Linux"
-      generation = try(os.targets.azure.hyper_v_generation, "V2")
-      display    = os.display_name
-    } if can(os.targets.azure)
-  }
 }
 
 # ---- Resource groups --------------------------------------------------------
@@ -71,24 +59,44 @@ resource "azurerm_shared_image_gallery" "this" {
   tags                = local.tags
 }
 
-resource "azurerm_shared_image" "os" {
-  for_each = local.azure_images
+# Image definitions are created per image request by the build job
+# (scripts/ci/lib.sh: ensure_gallery_image_definition), so new images need no
+# Terraform change.
 
-  name                = each.key
-  gallery_name        = azurerm_shared_image_gallery.this.name
-  resource_group_name = azurerm_resource_group.gallery.name
-  location            = azurerm_resource_group.gallery.location
-  os_type             = each.value.os_type
-  hyper_v_generation  = each.value.generation
-  description         = each.value.display
+# ---- VM landing zone (end-user VMs from the portal) -------------------------
+resource "azurerm_resource_group" "vms" {
+  name     = "rg-${var.name_prefix}-vms"
+  location = var.location
+  tags     = local.tags
+}
 
-  identifier {
-    publisher = var.image_publisher
-    offer     = each.value.os_key
-    sku       = "golden"
-  }
+resource "azurerm_virtual_network" "workloads" {
+  name                = "vnet-${var.name_prefix}-workloads"
+  resource_group_name = azurerm_resource_group.vms.name
+  location            = azurerm_resource_group.vms.location
+  address_space       = [var.workload_vnet_cidr]
+  tags                = local.tags
+}
 
-  tags = merge(local.tags, { OsKey = each.value.os_key })
+resource "azurerm_subnet" "workloads" {
+  name                 = "snet-workloads"
+  resource_group_name  = azurerm_resource_group.vms.name
+  virtual_network_name = azurerm_virtual_network.workloads.name
+  address_prefixes     = [cidrsubnet(var.workload_vnet_cidr, 8, 1)]
+}
+
+# Default rules only: VNet traffic in, nothing in from the internet. A VM
+# that asks for a public IP gets its own NIC-level rule for its SSH range.
+resource "azurerm_network_security_group" "workloads" {
+  name                = "nsg-${var.name_prefix}-workloads"
+  resource_group_name = azurerm_resource_group.vms.name
+  location            = azurerm_resource_group.vms.location
+  tags                = local.tags
+}
+
+resource "azurerm_subnet_network_security_group_association" "workloads" {
+  subnet_id                 = azurerm_subnet.workloads.id
+  network_security_group_id = azurerm_network_security_group.workloads.id
 }
 
 # ---- CI workload identity ---------------------------------------------------
@@ -148,7 +156,7 @@ resource "azuread_application_federated_identity_credential" "ci" {
   subject        = each.value.subject
 }
 
-# Least privilege: Contributor on the two factory resource groups only.
+# Least privilege: Contributor on the factory resource groups only.
 resource "azurerm_role_assignment" "build" {
   scope                = azurerm_resource_group.build.id
   role_definition_name = "Contributor"
@@ -158,5 +166,20 @@ resource "azurerm_role_assignment" "build" {
 resource "azurerm_role_assignment" "gallery" {
   scope                = azurerm_resource_group.gallery.id
   role_definition_name = "Contributor"
+  principal_id         = azuread_service_principal.factory.object_id
+}
+
+resource "azurerm_role_assignment" "vms" {
+  scope                = azurerm_resource_group.vms.id
+  role_definition_name = "Contributor"
+  principal_id         = azuread_service_principal.factory.object_id
+}
+
+# VM state files live next to the factory state (created by the bootstrap
+# script). Data-plane access only, no storage keys.
+resource "azurerm_role_assignment" "state" {
+  count                = var.tf_state_storage_account_id == "" ? 0 : 1
+  scope                = var.tf_state_storage_account_id
+  role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azuread_service_principal.factory.object_id
 }

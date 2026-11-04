@@ -25,12 +25,6 @@ variable "gallery_name" {
   }
 }
 
-variable "image_publisher" {
-  description = "Publisher name used in gallery image definitions"
-  type        = string
-  default     = "ImageFactory"
-}
-
 variable "github_repository" {
   description = "GitHub repository (owner/name) whose Actions may build and promote. Empty = GitHub not used."
   type        = string
@@ -81,4 +75,16 @@ variable "tags" {
   description = "Extra tags for every resource"
   type        = map(string)
   default     = {}
+}
+
+variable "workload_vnet_cidr" {
+  description = "Address space of the VNet that portal-created VMs join"
+  type        = string
+  default     = "10.60.0.0/16"
+}
+
+variable "tf_state_storage_account_id" {
+  description = "Resource ID of the Terraform state storage account; grants the CI identity blob access for VM state"
+  type        = string
+  default     = ""
 }
