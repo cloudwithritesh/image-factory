@@ -4,6 +4,7 @@
 #   state: absent   -> terraform destroy (decommission; the file stays as a record)
 # One Terraform state per VM: vms/<name>.tfstate in the factory state account.
 # The PR approval is the gate, so this runs straight away on merge.
+# Runs are serialised per VM (job-level concurrency below).
 # =============================================================================
 name: vm-provision
 
@@ -20,10 +21,6 @@ on:
 
 permissions:
   contents: read
-
-concurrency:
-  group: vm-provision
-  cancel-in-progress: false
 
 env:
   TF_VAR_subscription_id: ${{ vars.PKR_VAR_azure_subscription_id }}
@@ -79,6 +76,13 @@ jobs:
       fail-fast: false
       matrix:
         vm: ${{ fromJSON(needs.detect.outputs.vms) }}
+    # Serialise per VM, never globally. If a newer run for the same VM
+    # replaces a pending one, nothing is lost: it applies the newer file,
+    # which already contains the earlier change. Different VMs never wait
+    # on (or cancel) each other.
+    concurrency:
+      group: vm-provision-${{ matrix.vm }}
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: terraform/vm/azure
