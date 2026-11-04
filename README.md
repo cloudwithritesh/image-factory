@@ -14,9 +14,12 @@ request YAML ─► validate ─► Packer build (AWS │ Azure │ Docker) ─�
      └── self-service portal (Backstage, phase 3) opens a PR with the request
 ```
 
-Status: **phases 1 and 3–4**: Ubuntu 24.04 golden images (Azure + Docker live, AWS ready), plus a
-self-service portal (GitHub Pages + local Backstage) where DevOps request images and end users
-request VMs. Every request becomes a reviewed pull request ([portal/README.md](portal/README.md)).
+Status: **phases 1–4**: golden images for Ubuntu 24.04 (ga) and, in preview, RHEL 9, Rocky 9,
+Amazon Linux 2023, Fedora 44, SLES 15 SP7, Red Hat UBI 9 for OpenShift and Windows Server 2022
+(Azure + Docker live, AWS ready), plus a self-service portal (GitHub Pages + local Backstage) where
+DevOps request images and end users request VMs. Every request becomes a reviewed pull request
+([portal/README.md](portal/README.md)) that can only merge after a code-owner approval and green
+checks. Every step logs structured events for troubleshooting ([docs/logging.md](docs/logging.md)).
 
 | Portal | Where |
 |---|---|
@@ -27,7 +30,7 @@ request VMs. Every request becomes a reviewed pull request ([portal/README.md](p
 **Documentation:** [Architecture](docs/architecture.md) · [Workflows](docs/workflow.md) ·
 [Instructions](docs/instructions.md) (setup, daily use, troubleshooting) ·
 [Standards](docs/standards.md) · [Hardening exceptions](docs/hardening-exceptions.md) ·
-[Portal](portal/README.md)
+[Logging](docs/logging.md) · [Portal](portal/README.md) · [Notes for Claude](.claude/CLAUDE.md)
 
 ## How it works
 
@@ -41,9 +44,11 @@ request VMs. Every request becomes a reviewed pull request ([portal/README.md](p
    Ansible variables under `build/<name>/`, runs `packer validate`, and
    fans out one job per request and target (a GitHub matrix, or a GitLab
    child pipeline).
-4. **Build**: one Packer template (`packer/linux`) with three sources. They
-   all get the same Ansible provisioning: patch, install software, apply the
-   CIS profile, write `/etc/image-factory/build-info.json`.
+4. **Build**: one Packer template per OS family: `packer/linux` (sources
+   amazon-ebs, azure-arm, docker; SSH) and `packer/windows` (amazon-ebs,
+   azure-arm; WinRM). Every target of a family gets the same Ansible
+   provisioning: patch, install software, apply the hardening profile,
+   write `build-info.json`.
    - AWS: an encrypted AMI (customer-managed KMS key), tagged `Status=candidate`.
    - Azure: a Compute Gallery version with `excludeFromLatest=true`, in an image
      definition named after the request (created on first build).
@@ -76,8 +81,9 @@ schemas/              JSON schemas for image and VM requests
 requests/             one YAML per image (written by the portal or by hand)
 vms/                  one YAML per end-user VM (written by the portal)
 portal/               GitHub Pages portal, Backstage templates + setup
-packer/linux/         one build, sources: amazon-ebs, azure-arm, docker
-ansible/              image.yml playbook, roles (base, software), hardening vars
+packer/linux/         Linux build, sources: amazon-ebs, azure-arm, docker (apt / dnf / zypper)
+packer/windows/       Windows build, sources: amazon-ebs, azure-arm (WinRM, sysprep)
+ansible/              image.yml (Linux) and windows.yml playbooks, roles (base, software, baseline, openshift), hardening vars
 scripts/              imagefactory.py (validate/render/plan), CI scripts, VM/container scripts
 .github/workflows/    GitHub Actions pipeline (active)
 .github/actions/      setup-tools: pinned, checksum-verified Packer, Syft, Grype, crane
@@ -85,7 +91,8 @@ scripts/              imagefactory.py (validate/render/plan), CI scripts, VM/con
 ci/                   versions.env (tool pins), GitLab toolbox Dockerfile, Python requirements
 terraform/factory/    one-time AWS and Azure foundations (OIDC trust, network, gallery, KMS, VM landing zone)
 terraform/vm/azure/   one end-user VM from the latest promoted image (used by vm-provision)
-docs/                 hardening exceptions
+docs/                 architecture, workflows, instructions, standards, logging, hardening exceptions
+.claude/              CLAUDE.md (project guide for Claude Code) and issues.md (lessons learned)
 ```
 
 ## Quick deploy: GitHub + Azure
@@ -249,7 +256,7 @@ in one place.
 ## Roadmap
 
 1. ✅ Factory core: Ubuntu 24.04 on AWS, Azure and Docker; CIS L1/L2; SBOM; Grype gate; promotion; GitHub and GitLab pipelines
-2. More operating systems: RHEL 9 / Rocky 9, Amazon Linux 2023, Windows Server 2022 (WinRM, sysprep, CIS GPO role)
+2. ✅ More operating systems (preview): RHEL 9, Rocky 9, Amazon Linux 2023, Fedora 44, SLES 15 SP7, UBI 9 for OpenShift, Windows Server 2022 (WinRM, sysprep, CIS); next: first production builds → `ga`, Windows VMs
 3. ✅ Self-service portal: GitHub Pages + Backstage forms → standard PRs (image requests)
 4. ✅ VM self-service on Azure (Terraform per VM, latest promoted image); AWS EC2 module next
 5. Entra ID sign-in for Backstage, and hosting it (Azure Container Apps)

@@ -2,46 +2,56 @@
 # Software catalog: the approved installers and files a request can ask for.
 #
 # Supported types:
-#   apt   packages from the distro repositories
-#   url   download a file (checksum required) and optionally unpack it
-#   file  copy a file stored in this repo (ansible/files/...) onto the image
+#   package  packages from the distro repositories (apt, dnf or zypper,
+#            chosen from the OS's pkg_family). `packages` is the default
+#            list; `packages_by_family` overrides it per family.
+#            ("apt" is still accepted as an alias for older requests.)
+#   url      download a file (checksum required) and optionally unpack it
+#   file     copy a file stored in this repo (ansible/files/...) onto the
+#            image. `dest_by_family` overrides `dest` per family.
+#   choco    Windows packages from a Chocolatey feed (set
+#            factory_choco_source in ansible/vars/windows.yml to your
+#            internal feed in production)
 #
 # `os` and `targets` limit where an item can be used. The renderer rejects a
 # request that asks for an item on an OS or target it doesn't support.
 # -----------------------------------------------------------------------------
 curl:
   description: curl CLI
-  type: apt
+  type: package
   packages: [curl]
-  os: [ubuntu-2404]
+  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15]
   targets: [aws, azure, docker]
 
 jq:
   description: jq JSON processor
-  type: apt
+  type: package
   packages: [jq]
-  os: [ubuntu-2404]
+  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15]
   targets: [aws, azure, docker]
 
 unzip:
   description: unzip
-  type: apt
+  type: package
   packages: [unzip]
-  os: [ubuntu-2404]
+  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15]
   targets: [aws, azure, docker]
 
 ca-certificates:
   description: Mozilla CA bundle
-  type: apt
+  type: package
   packages: [ca-certificates]
-  os: [ubuntu-2404]
+  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15]
   targets: [aws, azure, docker]
 
 monitoring-basics:
-  description: htop, sysstat and iotop for troubleshooting
-  type: apt
+  description: sysstat and iotop (plus htop where the base repos ship it) for troubleshooting
+  type: package
   packages: [htop, sysstat, iotop]
-  os: [ubuntu-2404]
+  packages_by_family:
+    redhat: [sysstat, iotop] # htop is in EPEL only
+    suse: [sysstat, iotop]
+  os: [ubuntu-2404, rhel-9, rocky-9, amazonlinux-2023, fedora-44, sles-15]
   targets: [aws, azure]
 
 node-exporter:
@@ -54,7 +64,7 @@ node-exporter:
   unarchive: true
   strip_components: 1
   bin_links: [node_exporter]
-  os: [ubuntu-2404]
+  os: [ubuntu-2404, rhel-9, rocky-9, amazonlinux-2023, fedora-44, sles-15]
   targets: [aws, azure]
 
 corp-root-ca:
@@ -62,7 +72,33 @@ corp-root-ca:
   type: file
   src: ca-certificates/corp-root-ca.crt # relative to ansible/files/
   dest: /usr/local/share/ca-certificates/corp-root-ca.crt
+  dest_by_family:
+    redhat: /etc/pki/ca-trust/source/anchors/corp-root-ca.crt
+    suse: /etc/pki/trust/anchors/corp-root-ca.crt
+    windows: C:\ProgramData\image-factory\corp-root-ca.crt
   mode: "0644"
   notify: update-ca-certificates
-  os: [ubuntu-2404]
+  os: [ubuntu-2404, rhel-9, ubi9-openshift, rocky-9, amazonlinux-2023, fedora-44, sles-15, windows-2022]
   targets: [aws, azure, docker]
+
+# ---- Windows ----------------------------------------------------------------------
+7zip:
+  description: 7-Zip file archiver
+  type: choco
+  packages: [7zip.install]
+  os: [windows-2022]
+  targets: [aws, azure]
+
+powershell-7:
+  description: PowerShell 7 (pwsh)
+  type: choco
+  packages: [powershell-core]
+  os: [windows-2022]
+  targets: [aws, azure]
+
+sysinternals:
+  description: Sysinternals Suite troubleshooting tools
+  type: choco
+  packages: [sysinternals]
+  os: [windows-2022]
+  targets: [aws, azure]

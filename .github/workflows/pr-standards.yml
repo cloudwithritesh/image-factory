@@ -1,19 +1,37 @@
 # Enforces docs/standards.md on every pull request: branch name, PR title
 # and commit subjects, plus validation of all image and VM requests.
-# Make "pr-standards" a required check on main (the configure script does).
+# "pr-standards" is a required check on main (configure-github-repo.sh).
+#
+# workflow_dispatch: portal-request starts this for PRs it opens with
+# GITHUB_TOKEN. GitHub doesn't run pull_request workflows for those PRs
+# without a manual "Approve and run", but a dispatch from GITHUB_TOKEN is
+# allowed. The check is reported on the PR's head commit either way.
 name: pr-standards
 
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Pull request number to check"
+        type: string
+        required: true
 
 permissions:
   contents: read
   pull-requests: read
 
+concurrency:
+  group: pr-standards-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
 jobs:
   pr-standards:
     runs-on: ubuntu-latest
+    env:
+      FACTORY_LOG_LEVEL: ${{ vars.FACTORY_LOG_LEVEL || 'info' }}
+      FACTORY_LOG_DIR: ${{ github.workspace }}/build/logs
     steps:
       - uses: actions/checkout@v4
 
@@ -24,18 +42,37 @@ jobs:
       - name: Install validator dependencies
         run: pip install pyyaml==6.0.3 jsonschema==4.26.0
 
+      - name: Pull request details
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" > "$RUNNER_TEMP/pr.json"
+          head_sha="$(jq -r .head.sha "$RUNNER_TEMP/pr.json")"
+          # A dispatched run must check the commit it was started on
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$head_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::PR #${PR} head is ${head_sha}, but this run is on ${GITHUB_SHA}. Dispatch on the PR branch."
+            exit 1
+          fi
+          {
+            echo "number=${PR}"
+            echo "branch=$(jq -r .head.ref "$RUNNER_TEMP/pr.json")"
+          } >> "$GITHUB_OUTPUT"
+          jq -r .title "$RUNNER_TEMP/pr.json" > "$RUNNER_TEMP/title.txt"
+          echo "Checking PR #${PR} ($(jq -r .head.ref "$RUNNER_TEMP/pr.json") @ ${head_sha:0:7})"
+
       - name: Branch, title and commits
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ github.head_ref }}
-          TITLE: ${{ github.event.pull_request.title }}
-          PR: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+          PR: ${{ steps.pr.outputs.number }}
         run: |
           gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/commits" --paginate \
             --jq '.[].commit.message | split("\n")[0]' \
             | python3 -c 'import json, sys; print(json.dumps([l for l in sys.stdin.read().splitlines() if l]))' \
             > "$RUNNER_TEMP/commits.json"
-          python3 scripts/portal/standards.py check --branch "$BRANCH" --title "$TITLE" \
+          python3 scripts/portal/standards.py check --branch "$BRANCH" --title "$(cat "$RUNNER_TEMP/title.txt")" \
             --commits-file "$RUNNER_TEMP/commits.json"
 
       - name: Image and VM requests are valid

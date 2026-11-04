@@ -1,0 +1,47 @@
+---
+# Factory baseline hardening. Runs on VMs and containers; VM-only controls
+# check image_kind. Every control is listed in docs/hardening-exceptions.md
+# (section "Factory baseline").
+- name: Login banner
+  ansible.builtin.copy:
+    dest: "{{ item }}"
+    content: "{{ baseline_banner }}"
+    mode: "0644"
+    owner: root
+    group: root
+  loop: [/etc/issue, /etc/issue.net, /etc/motd]
+
+- name: Default umask for login shells ({{ baseline_umask }})
+  ansible.builtin.copy:
+    dest: /etc/profile.d/50-factory-umask.sh
+    content: "umask {{ baseline_umask }}\n"
+    mode: "0644"
+
+- name: Disable core dumps (limits)
+  when: baseline_disable_core_dumps
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/50-factory-core.conf
+    content: "*    hard    core    0\n"
+    mode: "0644"
+
+- name: Permissions on account files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "0644"
+    owner: root
+    group: root
+  loop: [/etc/passwd, /etc/group]
+
+- name: VM controls
+  when: image_kind == 'vm'
+  ansible.builtin.include_tasks: vm.yml
+
+- name: Remove setuid/setgid bits (containers)
+  when: baseline_strip_setuid
+  ansible.builtin.shell: |
+    set -o pipefail
+    find / -xdev -type f -perm /6000 -print -exec chmod a-s {} + 2>/dev/null | wc -l
+  args:
+    executable: /bin/bash
+  register: baseline_setuid
+  changed_when: baseline_setuid.stdout | int > 0

@@ -46,9 +46,23 @@ spec:
           title: Operating system
           type: string
           enum:
+            - amazonlinux-2023
+            - fedora-44
+            - rhel-9
+            - rocky-9
+            - sles-15
+            - ubi9-openshift
             - ubuntu-2404
+            - windows-2022
           enumNames:
-            - Ubuntu 24.04 LTS
+            - 'Amazon: Amazon Linux 2023 (preview)'
+            - 'Fedora Project: Fedora 44 (preview)'
+            - 'Red Hat: Red Hat Enterprise Linux 9 (preview)'
+            - 'Rocky Linux: Rocky Linux 9 (preview)'
+            - 'SUSE: SUSE Linux Enterprise Server 15 SP7 (preview)'
+            - 'Red Hat: Red Hat UBI 9 for OpenShift (container) (preview)'
+            - 'Canonical: Ubuntu 24.04 LTS'
+            - 'Microsoft: Windows Server 2022 Datacenter (preview)'
         targets:
           title: Targets
           type: array
@@ -66,6 +80,7 @@ spec:
           title: VM hardening profile
           type: string
           enum:
+            - baseline
             - cis-l1
             - cis-l2
             - none
@@ -74,8 +89,10 @@ spec:
           title: Container hardening profile
           type: string
           enum:
+            - baseline-container
             - cis-l1-container
             - none
+            - openshift
         software:
           title: Approved software
           type: array
@@ -83,20 +100,26 @@ spec:
           items:
             type: string
             enum:
+              - 7zip
               - ca-certificates
               - corp-root-ca
               - curl
               - jq
               - monitoring-basics
               - node-exporter
+              - powershell-7
+              - sysinternals
               - unzip
             enumNames:
+              - '7zip: 7-Zip file archiver'
               - 'ca-certificates: Mozilla CA bundle'
               - 'corp-root-ca: Corporate root CA certificate, added to the system trust store'
               - 'curl: curl CLI'
               - 'jq: jq JSON processor'
-              - 'monitoring-basics: htop, sysstat and iotop for troubleshooting'
+              - 'monitoring-basics: sysstat and iotop (plus htop where the base repos ship it) for troubleshooting'
               - 'node-exporter: Prometheus node_exporter binary (not enabled as a service)'
+              - 'powershell-7: PowerShell 7 (pwsh)'
+              - 'sysinternals: Sysinternals Suite troubleshooting tools'
               - 'unzip: unzip'
           ui:widget: checkboxes
     - title: Release

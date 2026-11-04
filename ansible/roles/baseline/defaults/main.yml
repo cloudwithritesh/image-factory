@@ -1,0 +1,41 @@
+---
+# Factory baseline: the controls CIS benchmarks share, for OSes without a
+# maintained open-source CIS role (Fedora, SLES) and for minimal containers.
+# Profiles override these in ansible/vars/hardening/baseline-*.yml.
+baseline_banner: |
+  Authorized use only. Activity on this system is monitored and logged.
+baseline_umask: "027"
+baseline_disable_core_dumps: true
+
+# VMs
+baseline_ssh: true
+baseline_ssh_settings:
+  PermitRootLogin: "no"
+  PasswordAuthentication: "no"
+  PermitEmptyPasswords: "no"
+  X11Forwarding: "no"
+  MaxAuthTries: "4"
+  LoginGraceTime: "60"
+  ClientAliveInterval: "300"
+  ClientAliveCountMax: "3"
+  Banner: /etc/issue.net
+baseline_sysctl: true
+baseline_sysctl_settings:
+  kernel.randomize_va_space: 2
+  fs.suid_dumpable: 0
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv4.conf.default.send_redirects: 0
+  net.ipv4.conf.all.accept_source_route: 0
+  net.ipv4.conf.default.accept_source_route: 0
+  net.ipv4.conf.all.log_martians: 1
+  net.ipv4.icmp_echo_ignore_broadcasts: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+# udf and squashfs stay: Azure provisioning media and snaps need them
+baseline_blacklisted_filesystems: [cramfs, freevxfs, hfs, hfsplus, jffs2]
+
+# Containers
+baseline_strip_setuid: false

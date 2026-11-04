@@ -15,23 +15,21 @@ build {
   }
 
   # -- 1. Bootstrap --------------------------------------------------------------
-  # Containers: Ansible needs Python, which the minimal base image lacks.
+  # Make the target ready for Ansible: Python (minimal container images
+  # lack it; SLES needs a newer one) and, on VMs, a finished cloud-init.
+  # The script detects apt / dnf / microdnf / zypper by itself.
   provisioner "shell" {
-    only = ["docker.linux"]
-    inline = [
-      "export DEBIAN_FRONTEND=noninteractive",
-      "apt-get update",
-      "apt-get install -y --no-install-recommends python3 python3-apt ca-certificates",
-    ]
+    only             = ["docker.linux"]
+    environment_vars = ["PKG_FAMILY=${var.pkg_family}", "IMAGE_KIND=container"]
+    execute_command  = "chmod +x {{ .Path }}; {{ .Vars }} sh '{{ .Path }}'"
+    script           = "${path.root}/../../scripts/linux/bootstrap.sh"
   }
 
-  # VMs: let cloud-init finish before changing anything (exit code 2 means
-  # it finished with recoverable errors).
   provisioner "shell" {
-    except = ["docker.linux"]
-    inline = [
-      "sudo cloud-init status --wait > /dev/null || [ $? -eq 2 ]",
-    ]
+    except           = ["docker.linux"]
+    environment_vars = ["PKG_FAMILY=${var.pkg_family}", "IMAGE_KIND=vm"]
+    execute_command  = "chmod +x {{ .Path }}; {{ .Vars }} sudo -E sh '{{ .Path }}'"
+    script           = "${path.root}/../../scripts/linux/bootstrap.sh"
   }
 
   # -- 2. Patch, install software, harden (Ansible) ------------------------------
@@ -50,6 +48,7 @@ build {
         "--extra-vars", "@${var.ansible_vm_vars_file}",
         "--extra-vars", "packer_source_type=${source.type}",
       ],
+      local.ansible_python_args,
       var.ansible_vm_skip_tags == "" ? [] : ["--skip-tags", var.ansible_vm_skip_tags],
     )
   }
@@ -72,8 +71,8 @@ build {
       [
         "--extra-vars", "@${var.ansible_container_vars_file}",
         "--extra-vars", "packer_source_type=${source.type}",
-        "--extra-vars", "ansible_python_interpreter=/usr/bin/python3",
       ],
+      var.ansible_python_interpreter == "" ? ["--extra-vars", "ansible_python_interpreter=/usr/bin/python3"] : local.ansible_python_args,
       var.ansible_container_skip_tags == "" ? [] : ["--skip-tags", var.ansible_container_skip_tags],
     )
   }
@@ -109,15 +108,16 @@ build {
   # -- 4. Cleanup / generalise -------------------------------------------------------
   provisioner "shell" {
     except           = ["docker.linux"]
-    environment_vars = ["PACKER_SOURCE_TYPE=${source.type}"]
+    environment_vars = ["PACKER_SOURCE_TYPE=${source.type}", "PKG_FAMILY=${var.pkg_family}"]
     execute_command  = "chmod +x {{ .Path }}; {{ .Vars }} sudo -E bash '{{ .Path }}'"
     script           = "${path.root}/../../scripts/vm/cleanup.sh"
     skip_clean       = true # on Azure the build user is deleted by waagent -deprovision+user
   }
 
   provisioner "shell" {
-    only   = ["docker.linux"]
-    script = "${path.root}/../../scripts/container/cleanup.sh"
+    only             = ["docker.linux"]
+    environment_vars = ["PKG_FAMILY=${var.pkg_family}"]
+    script           = "${path.root}/../../scripts/container/cleanup.sh"
   }
 
   # -- Post-processing -----------------------------------------------------------

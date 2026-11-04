@@ -1,0 +1,64 @@
+---
+# ---- SSH ------------------------------------------------------------------------
+- name: Check how sshd reads its configuration
+  when: baseline_ssh
+  ansible.builtin.command: grep -Eqs '^\s*Include\s+/etc/ssh/sshd_config\.d/' /etc/ssh/sshd_config /usr/etc/ssh/sshd_config
+  register: baseline_sshd_include
+  changed_when: false
+  failed_when: false
+
+- name: SSH settings as a drop-in
+  when: baseline_ssh and baseline_sshd_include.rc == 0
+  ansible.builtin.template:
+    src: sshd-factory.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-factory.conf
+    mode: "0600"
+    validate: /usr/sbin/sshd -t -f /etc/ssh/sshd_config
+  register: baseline_sshd_dropin
+
+- name: SSH settings in sshd_config (no drop-in support)
+  when: baseline_ssh and baseline_sshd_include.rc != 0
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?\\s*{{ item.key }}\\s"
+    line: "{{ item.key }} {{ item.value }}"
+    validate: /usr/sbin/sshd -t -f %s
+  loop: "{{ baseline_ssh_settings | dict2items }}"
+
+# ---- Kernel parameters ----------------------------------------------------------------
+- name: Kernel network and memory settings
+  when: baseline_sysctl
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/60-factory.conf
+    content: |
+      # Managed by the image factory baseline role
+      {% for k, v in baseline_sysctl_settings.items() %}
+      {{ k }} = {{ v }}
+      {% endfor %}
+    mode: "0644"
+  register: baseline_sysctl_file
+
+- name: Apply kernel settings now # noqa: no-handler  # must run before later tasks, not at the end
+  when: baseline_sysctl_file is changed
+  ansible.builtin.command: sysctl --system
+  changed_when: true
+
+- name: Core dumps off for setuid programs
+  when: baseline_disable_core_dumps
+  ansible.builtin.copy:
+    dest: /etc/systemd/coredump.conf.d/50-factory.conf
+    content: "[Coredump]\nStorage=none\nProcessSizeMax=0\n"
+    mode: "0644"
+  failed_when: false # systemd-coredump isn't installed everywhere
+
+# ---- Unused filesystems -----------------------------------------------------------------
+- name: Block unused filesystem modules
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/50-factory-filesystems.conf
+    content: |
+      # Managed by the image factory baseline role
+      {% for fs in baseline_blacklisted_filesystems %}
+      install {{ fs }} /bin/false
+      blacklist {{ fs }}
+      {% endfor %}
+    mode: "0644"

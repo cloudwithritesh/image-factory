@@ -46,8 +46,9 @@ requests are applied by `vm-provision` (Terraform, one state per VM).
 scripts/bootstrap/configure-github-repo.sh cloudwithritesh/image-factory
 ```
 This sets squash-only merges with the PR title, auto-delete of branches, a
-ruleset on `main` (PR + 1 approval + `pr-standards` check), permission for
-Actions to open PRs, and GitHub Pages.
+ruleset on `main` (1 code-owner approval, no bypass; required checks
+`pr-standards`, `lint`, `plan`), permission for Actions to open PRs, the fork
+approval policy, and GitHub Pages.
 
 ### 2. VM landing zone
 Re-run `scripts/bootstrap/deploy-github-azure.sh`. It now also creates the
@@ -57,14 +58,16 @@ repository variables.
 
 ### 3. Portal bot: GitHub App (recommended)
 Without an App, PRs are opened with the workflow's `GITHUB_TOKEN`. GitHub
-doesn't run other workflows for those PRs, so the processor records the
-`pr-standards` check itself, but `lint` and `plan` don't run on portal PRs.
-With an App, everything runs normally and commits show as `<app>[bot]`.
+won't run `pull_request` workflows for those PRs without an "Approve and
+run" click, so the portal job starts `pr-standards` and `image-factory`
+(lint + plan) itself with `workflow_dispatch` on the PR branch; the checks
+appear on the PR within seconds. With an App, the PR events trigger the
+checks directly and commits show as `<app>[bot]`.
 
 1. GitHub → Settings → Developer settings → GitHub Apps → **New GitHub App**
    - Name: `image-factory-bot` (or similar), Homepage: the repo URL, Webhook: off
    - Repository permissions: **Contents** read & write, **Pull requests** read & write,
-     **Issues** read & write, **Commit statuses** read & write, Metadata read
+     **Issues** read & write, **Actions** read & write, Metadata read
 2. Generate a private key and **install** the App on `image-factory` only.
 3. Store it:
    ```bash

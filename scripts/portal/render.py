@@ -78,6 +78,7 @@ def collect(repo: str) -> dict:
                 "owner": meta.get("owner", ""),
                 "description": meta.get("description", ""),
                 "os": spec.get("os", ""),
+                "family": (catalogs["os"].get(spec.get("os", "")) or {}).get("family", "linux"),
                 "targets": spec.get("targets", []),
                 "hardening": spec.get("hardening", {}),
                 "software": spec.get("software", []),
@@ -106,7 +107,9 @@ def collect(repo: str) -> dict:
     owner, name = repo.split("/", 1)
     return {
         "repo": {"owner": owner, "name": name, "full_name": repo, "url": f"https://github.com/{repo}"},
-        "os": {k: {"display_name": v["display_name"], "family": v["family"], "targets": sorted(v["targets"])}
+        "os": {k: {"display_name": v["display_name"], "family": v["family"], "targets": sorted(v["targets"]),
+                   "vendor": v.get("vendor", "Other"), "status": v.get("status", "ga"),
+                   "notes": " ".join(str(v.get("notes", "")).split())}
                for k, v in catalogs["os"].items()},
         "hardening": catalogs["hardening"],
         "software": {k: {"description": v.get("description", k), "type": v["type"],
@@ -188,7 +191,10 @@ def image_template(data: dict) -> dict:
                         "description": {"title": "Description", "type": "string", "maxLength": 250},
                         "os": {"title": "Operating system", "type": "string",
                                "enum": sorted(data["os"]),
-                               "enumNames": [data["os"][k]["display_name"] for k in sorted(data["os"])]},
+                               "enumNames": [
+                                   f"{data['os'][k]['vendor']}: {data['os'][k]['display_name']}"
+                                   + (" (preview)" if data["os"][k]["status"] == "preview" else "")
+                                   for k in sorted(data["os"])]},
                         "targets": {"title": "Targets", "type": "array", "uniqueItems": True, "minItems": 1,
                                     "items": {"type": "string", "enum": data["enabled_targets"]},
                                     "ui:widget": "checkboxes"},

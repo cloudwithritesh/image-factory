@@ -13,6 +13,26 @@ locals {
   })
 
   azure_replication_regions = distinct(concat([var.azure_gallery_location], var.azure_replication_regions))
+
+  # OpenShift-style images run as a non-root user with their own WORKDIR
+  docker_changes = concat(
+    [
+      "LABEL org.opencontainers.image.title=${var.image_name}",
+      "LABEL org.opencontainers.image.version=${var.image_version}",
+      "LABEL org.opencontainers.image.revision=${var.git_sha}",
+      "LABEL org.opencontainers.image.vendor=${var.image_owner}",
+      "LABEL org.opencontainers.image.base.name=${var.docker_base_image}",
+      "LABEL org.opencontainers.image.source=${var.docker_source_url}",
+      "LABEL io.image-factory.os=${var.os_key}",
+      "ENV LANG=C.UTF-8",
+      "CMD [\"/bin/bash\"]",
+    ],
+    var.docker_workdir == "" ? [] : ["WORKDIR ${var.docker_workdir}"],
+    var.docker_user == "" ? [] : ["USER ${var.docker_user}"],
+  )
+
+  # Extra vars every Ansible run gets
+  ansible_python_args = var.ansible_python_interpreter == "" ? [] : ["--extra-vars", "ansible_python_interpreter=${var.ansible_python_interpreter}"]
 }
 
 # ---------------------------------------------------------------------------
@@ -112,16 +132,7 @@ source "azure-arm" "linux" {
 # :candidate-<version>. The promote job adds the real tags.
 # ---------------------------------------------------------------------------
 source "docker" "linux" {
-  image  = var.docker_base_image
-  commit = true
-  changes = [
-    "LABEL org.opencontainers.image.title=${var.image_name}",
-    "LABEL org.opencontainers.image.version=${var.image_version}",
-    "LABEL org.opencontainers.image.revision=${var.git_sha}",
-    "LABEL org.opencontainers.image.vendor=${var.image_owner}",
-    "LABEL org.opencontainers.image.base.name=${var.docker_base_image}",
-    "LABEL org.opencontainers.image.source=${var.docker_source_url}",
-    "ENV LANG=C.UTF-8",
-    "CMD [\"/bin/bash\"]",
-  ]
+  image   = var.docker_base_image
+  commit  = true
+  changes = local.docker_changes
 }

@@ -1,0 +1,17 @@
+---
+# RHEL, Rocky, Amazon Linux and Fedora. ansible.builtin.dnf picks dnf5
+# automatically on Fedora 41+.
+- name: Apply all pending updates
+  ansible.builtin.dnf:
+    name: "*"
+    state: latest # noqa package-latest  # patching is the point of this task
+    update_cache: true
+  register: base_dnf_upgrade
+
+- name: Remember whether to reboot
+  ansible.builtin.set_fact:
+    base_updates_applied: "{{ base_dnf_upgrade is changed }}"
+
+- name: Remove unused dependencies
+  ansible.builtin.dnf:
+    autoremove: true

@@ -13,6 +13,13 @@
 #   workflow_dispatch   the image_request input (the portal calls this), or everything
 #   schedule            every request (monthly patch rebuild)
 #   pull request        lint and plan only; nothing is built
+#   dispatch on a branch lint and plan only (portal-request starts this for
+#                       bot PRs, so their required checks run without approval)
+#
+# Logging: every job writes structured events (events.jsonl) and tool logs;
+# they're uploaded as artifacts even when a job fails. Run with debug=true
+# (or set the FACTORY_LOG_LEVEL variable) for verbose Packer/Ansible logs.
+# See docs/logging.md.
 #
 # The same scripts run on GitLab (.gitlab-ci.yml), so the platform can change later.
 # =============================================================================
@@ -32,6 +39,10 @@ on:
         default: ""
       rebuild_all:
         description: "Rebuild every request"
+        type: boolean
+        default: false
+      debug:
+        description: "Verbose logs (Packer debug log, Ansible -vv). May include infrastructure details."
         type: boolean
         default: false
 
@@ -62,6 +73,9 @@ env:
   AWS_SHARE_ACCOUNT_IDS: ${{ vars.AWS_SHARE_ACCOUNT_IDS }}
   AWS_SHARE_ORG_ARN: ${{ vars.AWS_SHARE_ORG_ARN }}
   REGISTRY: ghcr.io
+  # Logging (scripts/ci/log.sh, scripts/factorylog.py)
+  FACTORY_LOG_LEVEL: ${{ inputs.debug && 'debug' || vars.FACTORY_LOG_LEVEL || 'info' }}
+  FACTORY_CORRELATION_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -86,14 +100,14 @@ jobs:
 
       - name: Packer format
         run: |
-          packer init packer/linux
+          for t in packer/*/; do packer init "$t"; done
           packer fmt -check -diff -recursive packer/
 
       - name: YAML
         run: yamllint -c .yamllint.yml .
 
       - name: Shell scripts
-        run: shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/container/*.sh scripts/bootstrap/*.sh scripts/portal/*.sh
+        run: shellcheck scripts/ci/*.sh scripts/vm/*.sh scripts/linux/*.sh scripts/container/*.sh scripts/bootstrap/*.sh scripts/portal/*.sh
 
       - name: Portal (tests, generated Backstage templates)
         run: |
@@ -106,7 +120,8 @@ jobs:
         run: |
           ansible-galaxy role install -r requirements.yml -p .galaxy/roles
           ansible-playbook image.yml --syntax-check -i localhost,
-          ansible-lint --offline image.yml roles/
+          ansible-playbook windows.yml --syntax-check -i localhost,
+          ansible-lint --offline image.yml windows.yml roles/
 
       - name: Terraform
         run: |
@@ -139,12 +154,15 @@ jobs:
       - name: Plan
         id: plan
         env:
+          FACTORY_LOG_DIR: build/logs
           IMAGE_REQUEST: ${{ inputs.image_request }}
           REBUILD_ALL: ${{ inputs.rebuild_all }}
           BEFORE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: python3 scripts/imagefactory.py plan --out build
 
       - name: Packer validate
+        env:
+          FACTORY_LOG_DIR: build/logs
         run: scripts/ci/packer-validate.sh
 
       - name: Plan summary
@@ -152,12 +170,13 @@ jobs:
           {
             echo "### Image plan"
             echo
-            echo '| Image | Version | Target | Fail on | Environment |'
-            echo '|---|---|---|---|---|'
-            jq -r '.[] | "| \(.name) | \(.version) | \(.target) | \(.fail_on_severity) | \(.environment) |"' build/matrix.json
+            echo '| Image | Version | Family | Target | Fail on | Environment |'
+            echo '|---|---|---|---|---|---|'
+            jq -r '.[] | "| \(.name) | \(.version) | \(.family) | \(.target) | \(.fail_on_severity) | \(.environment) |"' build/matrix.json
           } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: plan
           path: build/
@@ -169,7 +188,7 @@ jobs:
     needs: plan
     if: needs.plan.outputs.count != '0' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: ${{ matrix.family == 'windows' && 240 || 150 }}
     permissions:
       contents: read
       id-token: write # OIDC to AWS / Azure
@@ -188,6 +207,15 @@ jobs:
       REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Correlation (link the build to its portal request)
+        run: |
+          # Portal commits carry "Request-ref: i<issue>" / "r<run>" trailers
+          ref="$(git log -1 --format='%(trailers:key=Request-ref,valueonly,separator=%x20)' HEAD | tr -d '[:space:]')"
+          echo "REQUEST_REF=${ref}" >> "$GITHUB_ENV"
+          echo "Correlation: run ${FACTORY_CORRELATION_ID}, request ${ref:-n/a}, image ${IMAGE_NAME} ${IMAGE_VERSION} (${TARGET})"
 
       - uses: actions/download-artifact@v4
         with:
@@ -229,8 +257,8 @@ jobs:
         if: always()
         with:
           name: output-${{ matrix.name }}-${{ matrix.target }}
-          path: build/${{ matrix.name }}/output/
-          retention-days: 90
+          path: build/${{ matrix.name }}/output/ # SBOMs, scan report, manifest and logs/
+          retention-days: ${{ env.FACTORY_LOG_LEVEL == 'debug' && 7 || 90 }}
 
   # ---------------------------------------------------------------------------
   promote:
@@ -309,6 +337,14 @@ jobs:
       - name: Promote
         if: steps.gate.outputs.passed == 'true'
         run: scripts/ci/promote.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.gate.outputs.passed == 'true'
+        with:
+          name: logs-promote-${{ matrix.name }}-${{ matrix.target }}
+          path: build/${{ matrix.name }}/promote-logs/
+          if-no-files-found: ignore
+          retention-days: 90
 
       - uses: actions/upload-artifact@v4
         if: steps.gate.outputs.passed == 'true'

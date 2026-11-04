@@ -1,0 +1,11 @@
+---
+# Shared overrides for ansible-lockdown/AMAZON2023-CIS 1.5.0
+# (CIS Amazon Linux 2023 Benchmark). See docs/hardening-exceptions.md.
+setup_audit: false
+run_audit: false
+skip_reboot: true
+
+# EXCEPTION AllowUsers: defaults to the build user; see rhel9_cis.common.yml.
+amzn2023cis_sshd_allowusers: ""
+
+amzn2023cis_firewall: firewalld

@@ -48,7 +48,7 @@ plan. It's safe to re-run. What it does:
 | 3 | Terraform state storage `rg-image-factory-tfstate` / `stimgfac<hash>` (versioned) |
 | 4 | `terraform apply` of `terraform/factory/azure`: gallery, build RG, VM landing zone, Entra app + federated credentials, role assignments |
 | 5 | Repository variables from the Terraform outputs (+ `TF_STATE_*`) |
-| 6 | Promotion environments; then `configure-github-repo.sh`: squash-only, auto-delete branches, ruleset on `main`, Actions may open PRs, GitHub Pages + first deployment |
+| 6 | Promotion environments; then `configure-github-repo.sh`: squash-only, auto-delete branches, ruleset on `main` (1 code-owner approval, no bypass, required checks `pr-standards` + `lint` + `plan`), fork approval policy, Actions may open PRs, GitHub Pages + first deployment |
 | 7 | Pushes code on the first run; afterwards opens a `chore/bootstrap-…` PR for any files it changed (e.g. the provider lock file) |
 | 8 | Starts a build of `requests/ubuntu-2404-base.yaml` |
 
@@ -56,14 +56,16 @@ Options: `AZURE_SUBSCRIPTION_ID=… AZURE_LOCATION=… REPO_NAME=… SKIP_FIRST_
 
 ### 1.3 Portal bot: GitHub App (recommended)
 
-Without it, portal PRs only get the `pr-standards` status (posted by the
-processor), because GitHub doesn't run workflows for PRs opened by
-`GITHUB_TOKEN`.
+Optional. Without it, portal PRs are opened with `GITHUB_TOKEN` and the
+portal job starts the required checks itself (`workflow_dispatch` on the
+PR branch), because GitHub won't run `pull_request` workflows for those PRs
+without an "Approve and run" click. With the App, the checks run on the PR
+event and commits show as `image-factory-bot[bot]`.
 
 1. GitHub → Settings → Developer settings → GitHub Apps → **New GitHub App**:
    name `image-factory-bot`, homepage = repo URL, **Webhook off**.
    Repository permissions: Contents RW, Pull requests RW, Issues RW,
-   Commit statuses RW, Metadata R.
+   Actions RW, Metadata R.
 2. **Generate a private key**, then **Install App** on `image-factory` only.
 3. ```bash
    gh variable set PORTAL_APP_ID --repo cloudwithritesh/image-factory --body <app id>
@@ -132,23 +134,51 @@ Add an entry to `catalog/software.yaml` on a `feat/…` branch:
 ```yaml
 nginx:
   description: NGINX web server
-  type: apt                 # apt | url (checksum required) | file (from ansible/files/)
+  type: package             # package (apt/dnf/zypper) | url (checksum required) | file | choco (Windows)
   packages: [nginx]
-  os: [ubuntu-2404]
+  packages_by_family:       # optional, when names differ per distro family
+    suse: [nginx]
+  os: [ubuntu-2404, rhel-9, rocky-9]
   targets: [aws, azure, docker]
 ```
 Open a PR titled e.g. `feat(catalog): add nginx`. After merge the portal
 offers it automatically. Run `python3 scripts/portal/render.py backstage` and
 commit the result, or the `lint` freshness check fails.
 
-### 2.6 Add a hardening profile or OS (platform team)
+### 2.6 Choose an operating system
+
+| OS | Targets | Notes |
+|---|---|---|
+| Ubuntu 24.04 | AWS, Azure, Docker | CIS L1/L2; the most tested path |
+| RHEL 9 *(preview)* | AWS, Azure, Docker (UBI 9) | pay-as-you-go images; CIS L1/L2 |
+| Red Hat UBI 9 for OpenShift *(preview)* | Docker | runs as UID 1001, group-0 writable app folders |
+| Rocky Linux 9 *(preview)* | AWS, Docker | free RHEL rebuild; CIS L1/L2 |
+| Amazon Linux 2023 *(preview)* | AWS, Docker | CIS L1 |
+| Fedora 44 *(preview)* | AWS, Docker | short support life; developer/CI images |
+| SLES 15 SP7 *(preview)* | AWS, Azure, Docker (SLE BCI) | pay-as-you-go images; factory baseline |
+| Windows Server 2022 *(preview)* | AWS, Azure | 60-120 min builds (Windows Update); CIS L1/L2; image only (no self-service VMs yet) |
+
+The portal groups these by vendor and shows the targets, hardening
+profiles and software each one supports. Preview means the build path is
+implemented and validated, but hasn't had its first production build and
+review; treat the first image as a pilot.
+
+### 2.7 Add a hardening profile or OS (platform team)
+<a id="add-an-operating-system"></a>
 - Profile: add it under the OS in `catalog/hardening.yaml` and create its
   vars file in `ansible/vars/hardening/`. Record any deviations in
   `docs/hardening-exceptions.md`.
-- OS: add `catalog/os.yaml` (base image per target), `catalog/hardening.yaml`
-  (profiles), the hardening role in `ansible/requirements.yml`, and allow it
-  in the relevant `catalog/software.yaml` entries. RHEL/Rocky, Amazon Linux
-  2023 and Windows are on the roadmap.
+- OS:
+  1. `catalog/os.yaml`: `display_name`, `vendor`, `family` (linux/windows),
+     `pkg_family` (debian/redhat/suse/windows), `status: preview`, and the
+     base image per target. Check Azure images with
+     `az vm image list --publisher <p> --offer <o> --sku <s> --all -o table`.
+  2. `catalog/hardening.yaml`: profiles for `vm` and/or `container`
+     (a CIS role from `ansible/requirements.yml`, or `baseline`).
+  3. `catalog/software.yaml`: add the OS key to the items it may use.
+  4. `python3 scripts/portal/test_portal.py` (renders every OS), then
+     `python3 scripts/portal/render.py backstage` and commit.
+  5. Build it once with `image_request` and move it to `status: ga`.
 
 ---
 
@@ -200,7 +230,12 @@ checklist. Check:
 |---|---|
 | Image | right OS and targets; hardening not `none` outside labs; software justified; promotion mode; owner team |
 | VM | size and environment justified; SSH key belongs to the requester; public IP only with a narrow range; image is the intended one |
-| Any | `pr-standards` green; the YAML diff matches the description; `Requested-by` is who you expect |
+| Any | `pr-standards`, `lint` and `plan` green; the YAML diff matches the description; `Requested-by` is who you expect |
+
+The **Squash and merge** button stays disabled until a code owner approves
+and the three checks pass; nobody can bypass that, admins included. You
+can't approve your own PRs (GitHub rule), so PRs you open yourself need a
+second reviewer: add one to `.github/CODEOWNERS`.
 
 Approve, then **Squash and merge**. The branch is deleted automatically. To
 reject, close the PR; the `branch-cleanup` workflow deletes the branch.
@@ -219,6 +254,7 @@ reject, close the PR; the `branch-cleanup` workflow deletes the branch.
 | Rotate secrets | nothing to rotate: OIDC everywhere. If you use the GitHub App, rotate its private key in the App settings and `gh secret set` again |
 | Clean old image versions | `az sig image-version delete …` for versions no VM pins (check VM tags `ImageVersion`) |
 | Run the checks locally | `make lint`, `make portal-test`, `make portal` (preview on :8000) |
+| Verbose logs for one run | Run workflow with `debug: true`; see [logging.md](logging.md) |
 
 ---
 
@@ -231,6 +267,9 @@ reject, close the PR; the `branch-cleanup` workflow deletes the branch.
 | Bot comment: "isn't set up on this platform yet" | target cloud disabled in `catalog/vm.yaml` | enable the cloud or untick it |
 | Bot comment: "no changes" | the request matches the current file | change something, or use Run workflow to rebuild |
 | `pr-standards` fails | branch or title doesn't follow [standards.md](standards.md) | rename the branch (`feat/…`) / edit the PR title to `type(scope): subject` |
+| Portal PR shows "Expected — waiting for status" for checks | the dispatch in portal-request failed (see its run) | Actions → pr-standards / image-factory → Run workflow on the PR branch |
+| Merge button disabled on your own PR | no approval from another code owner (no bypass by design) | ask a second reviewer; emergency: `ALLOW_ADMIN_BYPASS=true scripts/bootstrap/configure-github-repo.sh` and undo afterwards |
+| Any build or VM failure | see the run summary's triage table | [logging.md](logging.md) lists every known cause and fix |
 | `lint` fails: "Backstage templates are out of date" | catalog or requests changed by hand | `python3 scripts/portal/render.py backstage` and commit |
 | Build fails in the CIS role | a control conflicts with the build environment | override it in `ansible/vars/hardening/`, document it in `hardening-exceptions.md` |
 | Scan gate fails | fixed vulnerabilities at or above the threshold | rebuild later (patched packages), or adjust `fail_on_severity` in the request after review |

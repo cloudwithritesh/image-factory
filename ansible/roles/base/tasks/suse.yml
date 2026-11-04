@@ -1,0 +1,24 @@
+---
+- name: Refresh repositories
+  community.general.zypper_repository:
+    repo: "*"
+    runrefresh: true
+    auto_import_keys: true
+
+- name: Apply all pending updates (patches)
+  community.general.zypper:
+    name: "*"
+    state: latest # noqa package-latest  # patching is the point of this task
+    type: patch
+  register: base_zypper_patch
+
+- name: Apply remaining package updates
+  community.general.zypper:
+    name: "*"
+    state: latest # noqa package-latest
+    type: package
+  register: base_zypper_update
+
+- name: Remember whether to reboot
+  ansible.builtin.set_fact:
+    base_updates_applied: "{{ base_zypper_patch is changed or base_zypper_update is changed }}"

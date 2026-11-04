@@ -2,5 +2,6 @@
 ansible==14.5.0        # ansible-core 2.21.x + community collections (community.general, ansible.posix, ...)
 ansible-lint==26.10.1
 jsonschema==4.26.0
+pywinrm==0.5.0         # Ansible over WinRM (Windows image builds)
 pyyaml==6.0.3
 yamllint==1.38.0

@@ -1,0 +1,24 @@
+---
+- name: Container baseline
+  ansible.builtin.include_role:
+    name: baseline
+
+- name: App user in group 0 ({{ openshift_user }})
+  ansible.builtin.user:
+    name: "{{ openshift_user }}"
+    uid: "{{ openshift_uid }}"
+    group: root
+    home: "{{ openshift_app_root }}/src"
+    create_home: false
+    shell: /sbin/nologin
+    system: true
+    comment: Default application user
+
+- name: Group-writable app folders (random UIDs are in group 0)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ openshift_uid }}"
+    group: "0"
+    mode: "0775"
+  loop: "{{ openshift_writable_dirs }}"

@@ -113,7 +113,7 @@
         </div>
         <label class="f"><span>Description</span><input type="text" id="img-desc" maxlength="250" placeholder="What this image is for"></label>
         <div class="row">
-          <label class="f"><span>Operating system</span><select id="img-os"></select></label>
+          <label class="f"><span>Operating system</span><select id="img-os"></select><div class="hint" id="img-os-hint"></div></label>
           <div class="f"><span style="display:block;margin-bottom:4px;font-weight:500">Targets</span>
             <div class="pills" id="img-targets"></div><div class="err" id="img-targets-err"></div></div>
         </div>
@@ -311,6 +311,7 @@ function imgState() {
 function renderImageOptions(keepSelection) {
   const os = $("img-os").value;
   const osCfg = D.os[os] || { targets: [] };
+  $("img-os-hint").innerHTML = (osCfg.status === "preview" ? '<span class="tag">preview</span> ' : "") + esc(osCfg.notes || "");
   const prev = new Set(keepSelection ? imgState().targets : osCfg.targets);
   const enabled = D.enabled_targets || ["aws", "azure", "docker"];
   $("img-targets").innerHTML = ["aws", "azure", "docker"].map((t) => {
@@ -403,7 +404,8 @@ function renderVmOptions() {
   const cat = D.vm_catalog;
   const cloud = $("vm-cloud").value;
   const c = cat.clouds[cloud] || { sizes: {}, regions: [] };
-  const images = Object.entries(D.images).filter(([, i]) => i.targets.includes(cloud)).map(([n]) => [n, n]);
+  // Self-service VMs are Linux only for now (SSH keys); Windows images are hidden
+  const images = Object.entries(D.images).filter(([, i]) => i.targets.includes(cloud) && i.family !== "windows").map(([n]) => [n, n]);
   opt($("vm-image"), images.length ? images : [["", "No approved images for this cloud yet"]], $("vm-image").value);
   opt($("vm-size"), Object.entries(c.sizes).map(([k, v]) => [k, `${k} (${v})`]), $("vm-size").value || "small");
   opt($("vm-region"), c.regions.map((r) => [r, r]), $("vm-region").value);
@@ -506,7 +508,12 @@ async function init() {
   $("footer").textContent = `Catalog generated ${D.generated_at} from ${D.repo.full_name}. Forms only offer what the pipeline accepts.`;
 
   opt($("img-existing"), [["", "New image"], ...Object.keys(D.images).map((n) => [n, n])]);
-  opt($("img-os"), Object.entries(D.os).map(([k, v]) => [k, v.display_name]));
+  // Operating systems grouped by vendor; preview ones are marked
+  const groups = {};
+  for (const [k, v] of Object.entries(D.os)) (groups[v.vendor || "Other"] ||= []).push([k, v]);
+  $("img-os").innerHTML = Object.keys(groups).sort().map((g) => `<optgroup label="${esc(g)}">` +
+    groups[g].map(([k, v]) => `<option value="${esc(k)}">${esc(v.display_name)}${v.status === "preview" ? " (preview)" : ""}</option>`).join("") +
+    "</optgroup>").join("");
   opt($("img-sev"), D.severities.map((s) => [s, s]), "critical");
   renderImageOptions(false);
   $("img-existing").onchange = loadExistingImage;

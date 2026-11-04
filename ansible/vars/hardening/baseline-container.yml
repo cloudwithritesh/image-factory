@@ -1,0 +1,6 @@
+---
+# Profile baseline-container: no SSH or kernel settings (the host owns
+# those); strip setuid/setgid bits so a compromised process can't escalate.
+baseline_ssh: false
+baseline_sysctl: false
+baseline_strip_setuid: true

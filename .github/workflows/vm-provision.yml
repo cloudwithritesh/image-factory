@@ -18,6 +18,10 @@ on:
         description: "VM name to (re)apply, e.g. web-01"
         type: string
         required: true
+      debug:
+        description: "Verbose Terraform logs (TF_LOG=DEBUG). May include infrastructure details."
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +33,9 @@ env:
   TF_VAR_gallery_resource_group: ${{ vars.PKR_VAR_azure_gallery_resource_group }}
   TF_VAR_gallery_name: ${{ vars.PKR_VAR_azure_gallery_name }}
   TF_IN_AUTOMATION: "true"
+  # Logging: see docs/logging.md
+  FACTORY_LOG_LEVEL: ${{ inputs.debug && 'debug' || vars.FACTORY_LOG_LEVEL || 'info' }}
+  FACTORY_CORRELATION_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   detect:
@@ -85,9 +92,28 @@ jobs:
       cancel-in-progress: false
     defaults:
       run:
+        # explicit bash = -eo pipefail, so "terraform ... | tee" keeps the exit code
+        shell: bash
         working-directory: terraform/vm/azure
+    env:
+      LOG_DIR: ${{ github.workspace }}/build/logs/vm-${{ matrix.vm }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Logging setup
+        env:
+          VM: ${{ matrix.vm }}
+        run: |
+          mkdir -p "$LOG_DIR"
+          ref="$(git log -1 --format='%(trailers:key=Request-ref,valueonly,separator=%x20)' HEAD | tr -d '[:space:]')"
+          echo "REQUEST_REF=${ref}" >> "$GITHUB_ENV"
+          if [[ "$FACTORY_LOG_LEVEL" == "debug" ]]; then
+            { echo "TF_LOG=DEBUG"; echo "TF_LOG_PATH=${LOG_DIR}/terraform-debug.log"; } >> "$GITHUB_ENV"
+            echo "::warning::Debug logging is on: terraform-debug.log may contain infrastructure details."
+          fi
+          echo "Correlation: run ${FACTORY_CORRELATION_ID}, request ${ref:-n/a}, VM ${VM}"
 
       - uses: actions/setup-python@v5
         with:
@@ -137,15 +163,29 @@ jobs:
             -backend-config="storage_account_name=${STATE_SA}" \
             -backend-config="container_name=tfstate" \
             -backend-config="key=vms/${VM}.tfstate" \
-            -backend-config="use_azuread_auth=true"
+            -backend-config="use_azuread_auth=true" 2>&1 | tee "${LOG_DIR}/terraform-init.log"
 
       - name: Terraform apply
         if: steps.request.outputs.state == 'present'
-        run: terraform apply -input=false -auto-approve
+        run: terraform apply -input=false -auto-approve -no-color 2>&1 | tee "${LOG_DIR}/terraform-apply.log"
 
       - name: Terraform destroy (decommission)
         if: steps.request.outputs.state == 'absent'
-        run: terraform destroy -input=false -auto-approve
+        run: terraform destroy -input=false -auto-approve -no-color 2>&1 | tee "${LOG_DIR}/terraform-destroy.log"
+
+      - name: Failure triage
+        if: failure()
+        env:
+          VM: ${{ matrix.vm }}
+        run: python3 "${GITHUB_WORKSPACE}/scripts/ci/triage.py" "$LOG_DIR"/terraform-*.log --title "VM ${VM} failed" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-vm-${{ matrix.vm }}
+          path: build/logs/vm-${{ matrix.vm }}/
+          if-no-files-found: ignore
+          retention-days: ${{ inputs.debug && 7 || 90 }}
 
       - name: Summary
         if: always()

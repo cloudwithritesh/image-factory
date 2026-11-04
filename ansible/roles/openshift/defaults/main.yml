@@ -1,0 +1,9 @@
+---
+# OpenShift container image conventions
+# (https://docs.openshift.com/container-platform/latest/openshift_images/create-images.html):
+# the image runs as a non-root user, and OpenShift's random UID (always in
+# group 0) must be able to write where the app writes.
+openshift_user: default
+openshift_uid: 1001
+openshift_app_root: /opt/app-root
+openshift_writable_dirs: [/opt/app-root, /opt/app-root/src]

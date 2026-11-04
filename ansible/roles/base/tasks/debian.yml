@@ -1,0 +1,25 @@
+---
+- name: Refresh the package index
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Apply all pending updates
+  ansible.builtin.apt:
+    upgrade: dist
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  register: base_apt_upgrade
+
+- name: Check whether a reboot is needed
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: base_reboot_required
+
+- name: Remember whether to reboot
+  ansible.builtin.set_fact:
+    base_updates_applied: "{{ base_reboot_required.stat.exists }}"
+
+- name: Remove superseded kernels and unused packages
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
