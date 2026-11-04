@@ -7,8 +7,8 @@ exactly what the request processor accepts.
   python3 scripts/portal/render.py backstage           portal/backstage/templates/*/template.yaml
   python3 scripts/portal/render.py backstage --check   fail if the committed templates are stale (CI)
 
-The repository (owner/name) comes from --repo, $GITHUB_REPOSITORY or the
-git remote.
+The repository (owner/name) comes from --repo, portal/config.yaml,
+$GITHUB_REPOSITORY or the git remote, in that order.
 """
 from __future__ import annotations
 
@@ -48,6 +48,11 @@ class Dumper(yaml.SafeDumper):
 def detect_repo(explicit: str | None) -> str:
     if explicit:
         return explicit
+    config = ROOT / "portal" / "config.yaml"
+    if config.is_file():
+        repo = (yaml.safe_load(config.read_text(encoding="utf-8")) or {}).get("github_repository")
+        if repo:
+            return repo
     if os.environ.get("GITHUB_REPOSITORY"):
         return os.environ["GITHUB_REPOSITORY"]
     try:
@@ -84,10 +89,19 @@ def collect(repo: str) -> dict:
         doc = pr.load_yaml_file(path) or {}
         meta, spec = doc.get("metadata", {}), doc.get("spec", {})
         if meta.get("name"):
+            # Everything the form edits, so an update starts from the current
+            # values (the SSH key is public by nature and already in the repo)
             vms[meta["name"]] = {
                 "owner": meta.get("owner", ""), "environment": meta.get("environment", ""),
+                "description": meta.get("description", ""),
                 "cloud": spec.get("cloud", ""), "image": spec.get("image", ""),
-                "size": spec.get("size", ""), "state": spec.get("state", "present"),
+                "image_version": spec.get("image_version", "latest"),
+                "size": spec.get("size", ""), "region": spec.get("region", ""),
+                "os_disk_gb": spec.get("os_disk_gb"), "admin_username": spec.get("admin_username", ""),
+                "ssh_public_key": spec.get("ssh_public_key", ""),
+                "public_ip": bool(spec.get("public_ip", False)),
+                "allowed_ssh_cidr": spec.get("allowed_ssh_cidr", ""),
+                "state": spec.get("state", "present"),
             }
     owner, name = repo.split("/", 1)
     return {

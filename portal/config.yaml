@@ -1,0 +1,4 @@
+# Portal settings shared by the generators and the CI checks.
+# The GitHub repository the portals submit to. Set explicitly so the
+# generated Backstage templates are the same on every CI platform.
+github_repository: cloudwithritesh/image-factory
