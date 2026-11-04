@@ -28,6 +28,9 @@ gh label create vm-request --color 1d76db --description "VM request" > /dev/null
 
 git switch -c "$branch"
 git add -- "$path"
+# The Backstage templates list images and VMs, so keep them in step
+python3 scripts/portal/render.py backstage > /dev/null
+git add -- portal/backstage/templates
 git commit --quiet --file "$msg_file"
 git push --quiet --set-upstream origin "$branch"
 

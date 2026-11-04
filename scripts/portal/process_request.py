@@ -50,6 +50,16 @@ class RequestError(Exception):
     """Shown to the requester (issue comment / workflow summary)."""
 
 
+class IndentedDumper(yaml.SafeDumper):
+    """Lists indented under their key, as .yamllint.yml requires; no anchors."""
+
+    def ignore_aliases(self, data):  # noqa: ARG002
+        return True
+
+    def increase_indent(self, flow=False, indentless=False):  # noqa: ARG002
+        return super().increase_indent(flow, False)
+
+
 # --------------------------------------------------------------------------- #
 # Reading the submission
 # --------------------------------------------------------------------------- #
@@ -338,7 +348,7 @@ def dump_yaml(doc: dict, sub: dict) -> str:
         f"# Last change: requested by @{sub['requested_by']} via {SOURCES[sub['source']]} "
         f"({sub['ref_text']}) on {dt.datetime.now(dt.timezone.utc):%Y-%m-%d}.\n"
     )
-    return header + yaml.safe_dump(doc, sort_keys=False, width=120, allow_unicode=True)
+    return header + yaml.dump(doc, Dumper=IndentedDumper, sort_keys=False, width=120, allow_unicode=True)
 
 
 def strip_header(content: str) -> str:
