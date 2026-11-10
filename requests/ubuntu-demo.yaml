@@ -1,0 +1,23 @@
+# Managed through the image factory portal.
+# Last change: requested by @cloudwithritesh via GitHub Pages portal (issue #9) on 2026-11-10.
+apiVersion: imagefactory/v1
+kind: ImageRequest
+metadata:
+  name: ubuntu-demo
+  owner: wayfinders
+  requested_by: cloudwithritesh
+spec:
+  os: ubuntu-2404
+  targets:
+    - azure
+  hardening:
+    vm: cis-l2
+  software:
+    - curl
+    - jq
+    - unzip
+    - ca-certificates
+    - monitoring-basics
+  scan:
+    fail_on_severity: critical
+  promotion: manual
